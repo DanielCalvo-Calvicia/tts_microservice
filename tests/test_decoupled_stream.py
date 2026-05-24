@@ -16,7 +16,11 @@ import httpx
 import sys
 import os
 
+from infrastructure.config import resolve_environment
+from infrastructure.logger import configure_logging, get_logger
+
 BASE_URL = os.getenv("TTS_TEST_BASE_URL", "http://127.0.0.1:8002")
+logger = get_logger(__name__)
 
 
 async def TestDecoupledStream():
@@ -30,7 +34,7 @@ async def TestDecoupledStream():
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         # Step 1: POST /process/stream/set — should return 202
-        print("[1/3] Sending text to POST /process/stream/set ...")
+        logger.info("[1/3] Sending text to POST /process/stream/set ...")
         setResponse = await client.post(
             f"{BASE_URL}/process/stream/set",
             content=textPayload,
@@ -40,13 +44,13 @@ async def TestDecoupledStream():
         assert setResponse.status_code == 202, (
             f"Expected 202 Accepted, got {setResponse.status_code}: {setResponse.text}"
         )
-        print(f"      -> Received {setResponse.status_code} Accepted")
+        logger.info("Received %s Accepted", setResponse.status_code)
 
         # Small delay so background generation can produce at least one chunk
         await asyncio.sleep(0.5)
 
         # Step 2: GET /process/stream/get — should stream audio bytes
-        print("[2/3] Streaming audio from GET /process/stream/get ...")
+        logger.info("[2/3] Streaming audio from GET /process/stream/get ...")
         totalBytes = 0
         chunkCount = 0
 
@@ -60,25 +64,26 @@ async def TestDecoupledStream():
                 chunkCount += 1
 
         # Step 3: Validate
-        print(f"[3/3] Validation:")
-        print(f"      -> Chunks received : {chunkCount}")
-        print(f"      -> Total bytes     : {totalBytes}")
+        logger.info("[3/3] Validation:")
+        logger.info("Chunks received: %s", chunkCount)
+        logger.info("Total bytes: %s", totalBytes)
 
         assert chunkCount > 0, "Expected at least one audio chunk but got none"
         assert totalBytes > 0, "Expected non-zero audio data but got 0 bytes"
 
-        print("\n=== PASS: Decoupled stream test completed successfully ===")
+        logger.info("PASS: Decoupled stream test completed successfully")
 
 
 if __name__ == "__main__":
+    configure_logging(resolve_environment())
     try:
         asyncio.run(TestDecoupledStream())
     except AssertionError as e:
-        print(f"\n=== FAIL: {e} ===")
+        logger.error("FAIL: %s", e)
         sys.exit(1)
     except httpx.ConnectError:
-        print(
-            f"\n=== ERROR: Could not connect to {BASE_URL}. "
-            "Is the TTS microservice running? ==="
+        logger.error(
+            "Could not connect to %s. Is the TTS microservice running?",
+            BASE_URL,
         )
         sys.exit(1)

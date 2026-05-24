@@ -1,5 +1,3 @@
-import logging
-
 from application.dtos.services_dtos import (
     ProcessStreamRequestDto as ServiceStreamRequest,
     ProcessBatchRequestDto as ServiceBatchRequest,
@@ -14,8 +12,9 @@ from application.dtos.adapter_outbound_dtos import (
     SetStreamRequestDto as OutboundSetStreamRequest,
     GetStreamRequestDto as OutboundGetStreamRequest,
 )
+from infrastructure.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 

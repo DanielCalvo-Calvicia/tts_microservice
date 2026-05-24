@@ -8,10 +8,13 @@ Prerequisites:
 
 import httpx
 import asyncio
-import time
 import base64
 
+from infrastructure.config import resolve_environment
+from infrastructure.logger import configure_logging, get_logger
+
 BASE_URL = "http://127.0.0.1:8002"
+logger = get_logger(__name__)
 
 
 # ----------------------------------------------
@@ -19,9 +22,9 @@ BASE_URL = "http://127.0.0.1:8002"
 # ----------------------------------------------
 
 def print_header(title: str) -> None:
-    print(f"\n{'-'*50}")
-    print(f"  {title}")
-    print(f"{'-'*50}")
+    logger.info("%s", "-" * 50)
+    logger.info("%s", title)
+    logger.info("%s", "-" * 50)
 
 
 def print_result(label: str, success: bool, detail: str = "") -> None:
@@ -29,7 +32,10 @@ def print_result(label: str, success: bool, detail: str = "") -> None:
     msg = f"  {icon} {label}"
     if detail:
         msg += f"  ->  {detail}"
-    print(msg)
+    if success:
+        logger.info(msg)
+    else:
+        logger.error(msg)
 
 
 # ----------------------------------------------
@@ -110,9 +116,9 @@ async def test_process_stream(client: httpx.AsyncClient) -> bool:
 # ----------------------------------------------
 
 async def run_tests() -> None:
-    print("\n" + "=" * 50)
-    print("  TTS Microservice  -  Integration Test")
-    print("=" * 50)
+    logger.info("%s", "=" * 50)
+    logger.info("TTS Microservice - Integration Test")
+    logger.info("%s", "=" * 50)
 
     results: list[bool] = []
 
@@ -132,13 +138,14 @@ async def run_tests() -> None:
     # Summary
     passed = sum(results)
     total = len(results)
-    print("\n" + "=" * 50)
+    logger.info("%s", "=" * 50)
     if passed == total:
-        print(f"  [SUCCESS] ALL PASSED  ({passed}/{total})")
+        logger.info("[SUCCESS] ALL PASSED (%s/%s)", passed, total)
     else:
-        print(f"  [FAILURE] FAILURES  ({passed}/{total} passed)")
-    print("=" * 50 + "\n")
+        logger.error("[FAILURE] FAILURES (%s/%s passed)", passed, total)
+    logger.info("%s", "=" * 50)
 
 
 if __name__ == "__main__":
+    configure_logging(resolve_environment())
     asyncio.run(run_tests())

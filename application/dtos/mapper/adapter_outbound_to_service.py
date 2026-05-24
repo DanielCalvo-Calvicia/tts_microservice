@@ -1,5 +1,3 @@
-import logging
-
 from application.dtos.adapter_outbound_dtos import (
     ProcessStreamResponseDto as OutboundStreamResponse,
     ProcessBatchResponseDto as OutboundBatchResponse,
@@ -12,8 +10,9 @@ from application.dtos.services_dtos import (
     TTSAvailabilityResponseDto as ServiceAvailabilityResponse,
     GetStreamResponseDto as ServiceGetStreamResponse,
 )
+from infrastructure.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 

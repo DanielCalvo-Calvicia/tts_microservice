@@ -883,8 +883,9 @@ Configuration sources:
 Runtime environment resolution:
 
 - Supported values are `development`, `staging`, and `production`.
-- Precedence is `VSCODE_ENV`, then `APP_ENV`, then `VSCODE_LAUNCH_PROFILE` mapped through `.vscode/launch.json`.
+- Environment precedence is process `VSCODE_ENV`, process `APP_ENV`, then `VSCODE_LAUNCH_PROFILE` mapped through `.vscode/launch.json`.
 - `env` values in a launch profile override values from that profile's `envFile`.
+- Env-file selection uses the selected `VSCODE_LAUNCH_PROFILE` first, then the first launch profile matching the resolved environment, then `.env` as the development fallback.
 - `debug`, `dev`, `stage`, and `prod` are accepted aliases for `development`, `development`, `staging`, and `production`.
 - Missing or invalid environment values fall back to `development`, the safe default with full local diagnostics.
 
@@ -904,7 +905,7 @@ Logging behavior:
 | `staging` | `warn`, `error`, `critical` |
 | `production` | `critical` |
 
-Every application log line includes timestamp, environment, level, and module scope.
+Every application log line includes timestamp, environment, level, and module scope. Uvicorn/FastAPI server logs are always shown at `info` level or higher, including access logs, in every environment.
 
 Environment variables:
 

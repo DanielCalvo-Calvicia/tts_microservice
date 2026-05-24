@@ -3,6 +3,7 @@ from typing import AsyncIterator, Any
 
 from fastapi import FastAPI, Request, status, HTTPException
 from fastapi.responses import JSONResponse, StreamingResponse
+from starlette.requests import ClientDisconnect
 
 from application.ports.adapter_inbound_port import AdapterInboundPort
 from application.ports.service_port import ServicePort
@@ -38,6 +39,20 @@ from infrastructure.logger import get_logger
 
 
 logger = get_logger(__name__)
+
+
+def _client_disconnect_response(action: str) -> JSONResponse:
+    return JSONResponse(
+        status_code=499,
+        content={
+            "action": action,
+            "status": "client_disconnected",
+            "status_code": 499,
+            "message": "Client disconnected before the request could be completed.",
+            "timestamp": time.time(),
+            "data": None,
+        },
+    )
 
 
 class FastApiAdapter(AdapterInboundPort):
@@ -163,6 +178,9 @@ class FastApiAdapter(AdapterInboundPort):
                         "X-Timestamp": str(time.time()),
                     }
                 )
+            except ClientDisconnect:
+                logger.warning("HTTP POST /process/stream client disconnected while reading request body")
+                return _client_disconnect_response("process_stream")
             except Exception as e:
                 logger.exception("HTTP POST /process/stream failed")
                 return JSONResponse(
@@ -227,6 +245,9 @@ class FastApiAdapter(AdapterInboundPort):
                         "data": None,
                     }
                 )
+            except ClientDisconnect:
+                logger.warning("HTTP POST /process/stream/set client disconnected while reading request body")
+                return _client_disconnect_response("set_stream")
             except Exception as e:
                 logger.exception("HTTP POST /process/stream/set failed")
                 return JSONResponse(
