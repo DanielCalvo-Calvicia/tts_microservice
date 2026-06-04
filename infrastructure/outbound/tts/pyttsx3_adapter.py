@@ -3,9 +3,10 @@ import tempfile
 import os
 import sys
 import wave
-from typing import AsyncIterator, Optional
+from typing import Any, AsyncIterator, Optional
 
 from application.ports.adapter_outbound_port import AdapterOutboundPort
+from application.dtos.stream_items import AudioSegmentEnd, AudioStreamError
 from application.dtos.adapter_outbound_dtos import (
     InitOutboundAdapterDto,
     ProcessStreamRequestDto,
@@ -24,7 +25,7 @@ from infrastructure.logger import get_logger
 logger = get_logger(__name__)
 
 
-async def _run_tts_subprocess(text: str, file_path: str, speech_rate: int, voice_name_pref: str) -> Optional[Exception]:
+async def _run_tts_subprocess(text: str, file_path: str, speech_rate: int, voice_name_pref: str) -> None:
     """
     Spawns pyttsx3 in an isolated process using the current python executable.
     This completely isolates SAPI5/COM thread execution to a fresh OS process,
@@ -85,17 +86,16 @@ async def _run_tts_subprocess(text: str, file_path: str, speech_rate: int, voice
         if process.returncode != 0:
             raise RuntimeError(f"TTS Subprocess synthesis failed: {stderr_text}")
         logger.info("TTS subprocess synthesis succeeded file_path=%s", file_path)
-        return None
-    except Exception as e:
+    except Exception:
         logger.exception("Unexpected error in TTS subprocess")
-        return e
+        raise
 
 
 class AsyncAudioStream(AsyncIterator[bytes]):
     def __init__(self, request: ProcessStreamRequestDto, config: InitOutboundAdapterDto):
         self.request = request
         self.config = config
-        self.chunk_queue = asyncio.Queue()
+        self.chunk_queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue[Optional[bytes]]()
         logger.info(
             "AsyncAudioStream initialized sample_rate=%s channels=%s speech_rate=%s voice=%s",
             request.sample_rate,
@@ -103,9 +103,9 @@ class AsyncAudioStream(AsyncIterator[bytes]):
             config.speech_rate,
             config.voice_name_preference,
         )
-        self._generator_task = asyncio.create_task(self._generate_audio())
+        self._generator_task: asyncio.Task[None] = asyncio.create_task(self._generate_audio())
 
-    async def _generate_audio(self):
+    async def _generate_audio(self) -> None:
         logger.info("AsyncAudioStream generation task started")
         try:
             text_count = 0
@@ -169,7 +169,7 @@ class AsyncAudioStream(AsyncIterator[bytes]):
             logger.info("AsyncAudioStream enqueueing end-of-stream sentinel")
             await self.chunk_queue.put(None)  # Sentinel to stop consumer
 
-    def __aiter__(self):
+    def __aiter__(self) -> "AsyncAudioStream":
         return self
 
     async def __anext__(self) -> bytes:
@@ -181,34 +181,49 @@ class AsyncAudioStream(AsyncIterator[bytes]):
         return chunk
 
 
-class DecoupledAudioStream(AsyncIterator[bytes]):
+class DecoupledAudioStream(AsyncIterator[Any]):
     """Async iterator that drains audio chunks from the shared single-flow queue."""
 
-    def __init__(self, queue: asyncio.Queue):
+    def __init__(self, queue: asyncio.Queue[Any]):
         self._queue = queue
 
-    def __aiter__(self):
+    def __aiter__(self) -> "DecoupledAudioStream":
         return self
 
-    async def __anext__(self) -> bytes:
-        chunk = await self._queue.get()
-        if chunk is None:
+    async def __anext__(self) -> Any:
+        item = await self._queue.get()
+        if item is None:
             logger.info("DecoupledAudioStream consumer reached end-of-stream sentinel")
             raise StopAsyncIteration
-        logger.info("DecoupledAudioStream consumer returning chunk_bytes=%s", len(chunk))
-        return chunk
+        if isinstance(item, AudioStreamError):
+            logger.info("DecoupledAudioStream consumer returning audio stream error code=%s", item.code)
+            return item
+        if isinstance(item, AudioSegmentEnd):
+            logger.info("DecoupledAudioStream consumer returning audio segment end")
+            return item
+        logger.info("DecoupledAudioStream consumer returning chunk_bytes=%s", len(item))
+        return item
 
 
 class PyTTSx3Adapter(AdapterOutboundPort):
-    def __init__(self, config: InitOutboundAdapterDto):
+    def __init__(self, config: Optional[InitOutboundAdapterDto] = None):
         self.config = config
-        self._audio_queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue()
-        self._generator_task: Optional[asyncio.Task] = None
+        self._audio_queue: asyncio.Queue[Any] = asyncio.Queue()
+        self._generator_task: Optional[asyncio.Task[None]] = None
+        logger.info("PyTTSx3Adapter created initialized=%s", config is not None)
+
+    async def init(self, config: InitOutboundAdapterDto) -> None:
+        self.config = config
         logger.info(
-            "PyTTSx3Adapter initialized speech_rate=%s voice_name_preference=%s",
+            "PyTTSx3Adapter configured speech_rate=%s voice_name_preference=%s",
             config.speech_rate,
             config.voice_name_preference,
         )
+
+    def _require_config(self) -> InitOutboundAdapterDto:
+        if self.config is None:
+            raise RuntimeError("PyTTSx3Adapter must be initialized before use.")
+        return self.config
 
     async def process_stream(self, request: ProcessStreamRequestDto) -> ProcessStreamResponseDto:
         logger.info(
@@ -216,7 +231,7 @@ class PyTTSx3Adapter(AdapterOutboundPort):
             request.sample_rate,
             request.channels,
         )
-        audio_stream = AsyncAudioStream(request, self.config)
+        audio_stream = AsyncAudioStream(request, self._require_config())
         logger.info("PyTTSx3Adapter.process_stream returning AsyncAudioStream")
         return ProcessStreamResponseDto(audio_stream=audio_stream)
 
@@ -227,6 +242,7 @@ class PyTTSx3Adapter(AdapterOutboundPort):
             request.sample_rate,
             request.channels,
         )
+        config = self._require_config()
         temp_path = ""
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
             temp_path = temp_wav.name
@@ -236,36 +252,36 @@ class PyTTSx3Adapter(AdapterOutboundPort):
             await _run_tts_subprocess(
                 text=request.text,
                 file_path=temp_path,
-                speech_rate=self.config.speech_rate,
-                voice_name_pref=self.config.voice_name_preference,
+                speech_rate=config.speech_rate,
+                voice_name_pref=config.voice_name_preference,
             )
 
+            audio_data = bytearray()
             with wave.open(temp_path, "rb") as wf:
-                chunkSize = 1024
-                data = wf.readframes(chunkSize)
+                chunk_size = 1024
+                data = wf.readframes(chunk_size)
                 chunk_count = 0
                 total_bytes = 0
                 while data:
-                    await self._audio_queue.put(data)
+                    audio_data.extend(data)
                     chunk_count += 1
                     total_bytes += len(data)
                     logger.info(
-                        "PyTTSx3Adapter.process_batch queued chunk chunk_count=%s chunk_bytes=%s total_bytes=%s",
+                        "PyTTSx3Adapter.process_batch read chunk chunk_count=%s chunk_bytes=%s total_bytes=%s",
                         chunk_count,
                         len(data),
                         total_bytes,
                     )
                     await asyncio.sleep(0.001)
-                    data = wf.readframes(chunkSize)            
-            
-                # 3. Return the data without touching self._audio_queue
+                    data = wf.readframes(chunk_size)
+
                 logger.info(
                     "PyTTSx3Adapter.process_batch finished chunk_count=%s total_bytes=%s returned_audio_bytes=%s",
                     chunk_count,
                     total_bytes,
-                    len(data),
+                    len(audio_data),
                 )
-                return ProcessBatchResponseDto(audio_data=data)
+                return ProcessBatchResponseDto(audio_data=bytes(audio_data))
         finally:
             if os.path.exists(temp_path):
                 try:
@@ -308,13 +324,14 @@ class PyTTSx3Adapter(AdapterOutboundPort):
     async def get_stream(self, request: GetStreamRequestDto) -> GetStreamResponseDto:
         """Return an async iterator wrapping the current single-flow audio queue."""
         logger.info("PyTTSx3Adapter.get_stream started")
-        audioStream = DecoupledAudioStream(self._audio_queue)
+        audio_stream = DecoupledAudioStream(self._audio_queue)
         logger.info("PyTTSx3Adapter.get_stream returning DecoupledAudioStream")
-        return GetStreamResponseDto(audio_stream=audioStream)
+        return GetStreamResponseDto(audio_stream=audio_stream)
 
     async def _generate_decoupled_audio(self, request: SetStreamRequestDto) -> None:
         """Background coroutine: consume text_stream, synthesize WAV chunks, push to queue."""
         logger.info("PyTTSx3Adapter decoupled generation task started")
+        config = self._require_config()
         try:
             text_count = 0
             chunk_count = 0
@@ -330,22 +347,22 @@ class PyTTSx3Adapter(AdapterOutboundPort):
                     text_count,
                     len(text),
                 )
-                tempPath = ""
-                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tempWav:
-                    tempPath = tempWav.name
-                logger.info("PyTTSx3Adapter decoupled generation temporary WAV created path=%s", tempPath)
+                temp_path = ""
+                with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
+                    temp_path = temp_wav.name
+                logger.info("PyTTSx3Adapter decoupled generation temporary WAV created path=%s", temp_path)
 
                 try:
                     await _run_tts_subprocess(
                         text=text,
-                        file_path=tempPath,
-                        speech_rate=self.config.speech_rate,
-                        voice_name_pref=self.config.voice_name_preference,
+                        file_path=temp_path,
+                        speech_rate=config.speech_rate,
+                        voice_name_pref=config.voice_name_preference,
                     )
 
-                    with wave.open(tempPath, "rb") as wf:
-                        chunkSize = 1024
-                        data = wf.readframes(chunkSize)
+                    with wave.open(temp_path, "rb") as wf:
+                        chunk_size = 1024
+                        data = wf.readframes(chunk_size)
                         while data:
                             await self._audio_queue.put(data)
                             chunk_count += 1
@@ -358,14 +375,19 @@ class PyTTSx3Adapter(AdapterOutboundPort):
                                 total_bytes,
                             )
                             await asyncio.sleep(0.001)
-                            data = wf.readframes(chunkSize)
+                            data = wf.readframes(chunk_size)
                 finally:
-                    if os.path.exists(tempPath):
+                    if os.path.exists(temp_path):
                         try:
-                            os.remove(tempPath)
-                            logger.info("PyTTSx3Adapter decoupled generation temporary WAV removed path=%s", tempPath)
+                            os.remove(temp_path)
+                            logger.info("PyTTSx3Adapter decoupled generation temporary WAV removed path=%s", temp_path)
                         except OSError:
-                            logger.exception("PyTTSx3Adapter decoupled generation failed to remove temporary WAV path=%s", tempPath)
+                            logger.exception("PyTTSx3Adapter decoupled generation failed to remove temporary WAV path=%s", temp_path)
+                await self._audio_queue.put(AudioSegmentEnd())
+                logger.info(
+                    "PyTTSx3Adapter decoupled generation queued audio segment end text_index=%s",
+                    text_count,
+                )
             logger.info(
                 "PyTTSx3Adapter decoupled generation completed text_count=%s chunk_count=%s total_bytes=%s",
                 text_count,
@@ -375,6 +397,15 @@ class PyTTSx3Adapter(AdapterOutboundPort):
         except asyncio.CancelledError:
             logger.info("PyTTSx3Adapter decoupled generation task cancelled")
             pass
+        except Exception as exc:
+            logger.exception("PyTTSx3Adapter decoupled generation failed")
+            await self._audio_queue.put(
+                AudioStreamError(
+                    code="synthesis_failed",
+                    message=f"Failed to synthesize speech: {str(exc)}",
+                    recoverable=True,
+                )
+            )
         finally:
             # Sentinel signals end-of-stream to the consumer
             logger.info("PyTTSx3Adapter decoupled generation enqueueing end-of-stream sentinel")

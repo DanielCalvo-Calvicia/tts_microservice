@@ -85,7 +85,7 @@ def _trace(self: logging.Logger, message: str, *args, **kwargs) -> None:
 
 
 logging.addLevelName(TRACE_LEVEL, "TRACE")
-logging.Logger.trace = _trace
+setattr(logging.Logger, "trace", _trace)
 
 
 def configure_logging(environment: str | None = None) -> str:

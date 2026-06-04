@@ -1,5 +1,19 @@
 from dataclasses import dataclass
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
+
+
+@dataclass(slots=True, frozen=True)
+class InitServiceDto:
+    """Service-layer request to initialize the outbound TTS adapter."""
+    speech_rate: int = 140
+    voice_name_preference: str = "Zira"
+    openai_api_key: Optional[str] = None
+    openai_model: str = "gpt-4o-mini-tts"
+    openai_voice: str = "alloy"
+    openai_response_format: str = "wav"
+    openai_instructions: Optional[str] = None
+    openai_speed: Optional[float] = None
+    openai_base_url: str = "https://api.openai.com/v1"
 
 
 # ──────────────────────────────────────────────

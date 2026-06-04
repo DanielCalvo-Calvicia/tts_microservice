@@ -9,6 +9,7 @@ Prerequisites:
 import httpx
 import asyncio
 import base64
+import json
 
 from infrastructure.config import resolve_environment
 from infrastructure.logger import configure_logging, get_logger
@@ -36,6 +37,35 @@ def print_result(label: str, success: bool, detail: str = "") -> None:
         logger.info(msg)
     else:
         logger.error(msg)
+
+
+def text_stream_body(*chunks: str) -> str:
+    events = [
+        {
+            "type": "stream_started",
+            "sequence": 1,
+            "timestamp": "2026-05-24T12:00:00Z",
+            "payload": {},
+        }
+    ]
+    for sequence, chunk in enumerate(chunks, start=2):
+        events.append(
+            {
+                "type": "partial",
+                "sequence": sequence,
+                "timestamp": "2026-05-24T12:00:00Z",
+                "payload": {"text": chunk},
+            }
+        )
+    events.append(
+        {
+            "type": "completed",
+            "sequence": len(events) + 1,
+            "timestamp": "2026-05-24T12:00:00Z",
+            "payload": {"reason": "completed", "output": "".join(chunks)},
+        }
+    )
+    return "\n".join(json.dumps(event) for event in events) + "\n"
 
 
 # ----------------------------------------------
@@ -96,15 +126,35 @@ async def test_process_batch(client: httpx.AsyncClient) -> bool:
 async def test_process_stream(client: httpx.AsyncClient) -> bool:
     print_header("4. Streaming Synthesis  ->  POST /process/stream")
     try:
-        content_payload = "Hello!\nThis is a real-time speech streaming test."
-        
-        audio_len = 0
-        async with client.stream("POST", f"{BASE_URL}/process/stream", content=content_payload) as resp:
-            async for chunk in resp.aiter_bytes():
-                audio_len += len(chunk)
+        content_payload = text_stream_body("Hello!", "This is a real-time speech streaming test.")
 
-        ok = resp.status_code == 200 and audio_len > 0
-        print_result("Streaming Synthesis", ok, f"status={resp.status_code} total_audio_received={audio_len} bytes")
+        events = []
+        audio_len = 0
+        async with client.stream(
+            "POST",
+            f"{BASE_URL}/process/stream",
+            content=content_payload,
+            headers={"Content-Type": "application/x-ndjson"},
+        ) as resp:
+            async for line in resp.aiter_lines():
+                if not line:
+                    continue
+                event = json.loads(line)
+                events.append(event)
+                if event.get("type") == "partial":
+                    audio_len += len(base64.b64decode(event.get("payload", {}).get("bytes_base64", "")))
+                if event.get("type") == "completed":
+                    break
+
+        event_types = [event.get("type") for event in events]
+        ok = (
+            resp.status_code == 200
+            and event_types[:1] == ["stream_started"]
+            and "partial" in event_types
+            and "completed" in event_types
+            and audio_len > 0
+        )
+        print_result("Streaming Synthesis", ok, f"status={resp.status_code} event_types={event_types} total_audio={audio_len} bytes")
         return ok
     except Exception as e:
         print_result("Streaming Synthesis", False, f"Exception: {e}")

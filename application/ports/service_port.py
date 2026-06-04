@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from application.dtos.services_dtos import (
+    InitServiceDto,
     ProcessStreamRequestDto,
     ProcessStreamResponseDto,
     ProcessBatchRequestDto,
@@ -14,6 +15,11 @@ from application.dtos.services_dtos import (
 
 
 class ServicePort(ABC):
+    @abstractmethod
+    async def init(self, request: InitServiceDto) -> None:
+        """Initialize service dependencies."""
+        pass
+
     @abstractmethod
     async def process_stream(self, request: ProcessStreamRequestDto) -> ProcessStreamResponseDto:
         """Orchestrate real-time text stream to audio synthesis."""
