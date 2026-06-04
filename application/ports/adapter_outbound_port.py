@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 
 from application.dtos.adapter_outbound_dtos import (
+    InitOutboundAdapterDto,
     ProcessStreamRequestDto,
     ProcessStreamResponseDto,
     ProcessBatchRequestDto,
@@ -14,6 +15,11 @@ from application.dtos.adapter_outbound_dtos import (
 
 
 class AdapterOutboundPort(ABC):
+    @abstractmethod
+    async def init(self, config: InitOutboundAdapterDto) -> None:
+        """Initialize or reconfigure the outbound TTS adapter."""
+        pass
+
     @abstractmethod
     async def process_stream(self, request: ProcessStreamRequestDto) -> ProcessStreamResponseDto:
         """Send a text stream to the TTS engine and yield an audio stream."""
