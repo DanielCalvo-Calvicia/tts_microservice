@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import AsyncIterator, Optional
+from typing import AsyncIterator
 
 
 # ──────────────────────────────────────────────

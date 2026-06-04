@@ -4,6 +4,54 @@ This document provides a comprehensive technical breakdown of how real-time stre
 
 ---
 
+## NDJSON Event Stream Contract
+
+Streaming endpoints return `application/x-ndjson`: one complete JSON event object per line. Clients must process `completed` as the end of the current logical audio output and must not wait for the HTTP connection to close before acting on the result.
+
+Every event contains:
+
+```json
+{"type":"stream_started|partial|completed|error|heartbeat","sequence":1,"timestamp":"2026-05-24T12:00:00Z","payload":{}}
+```
+
+Required fields:
+
+- `type`: string event type.
+- `sequence`: integer that starts at `1` and increases by exactly `1` for each event in the stream.
+- `timestamp`: UTC ISO-8601 timestamp.
+- `payload`: event-specific object.
+
+Event payloads used by this service:
+
+- `stream_started`: `{}`
+- text `partial` input: `{"text":"..."}`
+- audio `partial` output: `{"bytes_base64":"..."}`
+- text `completed` input: `{"reason":"completed","output":"..."}`
+- audio `completed` output: `{"reason":"completed","output_bytes_base64":"..."}`
+- `error`: `{"code":"stream_failed","message":"human readable explanation","recoverable":true}`
+- `heartbeat`: `{}`
+
+Example audio response:
+
+```json
+{"type":"stream_started","sequence":1,"timestamp":"2026-05-24T12:00:00Z","payload":{}}
+{"type":"partial","sequence":2,"timestamp":"2026-05-24T12:00:01Z","payload":{"bytes_base64":"UklGRg=="}}
+{"type":"completed","sequence":3,"timestamp":"2026-05-24T12:00:02Z","payload":{"reason":"completed","output_bytes_base64":"UklGRg=="}}
+```
+
+The connection may remain open after `completed`; for example, when `keep_open_after_completed=true`, the server can continue sending `heartbeat` events. Clients should read one event at a time, validate the required fields, buffer `partial` audio as needed, act immediately on `completed`, and stop or retry on `error`.
+
+`POST /process/stream` and `POST /process/stream/set` also require this NDJSON event shape for text input. Raw text lines are no longer accepted. A valid request body looks like:
+
+```json
+{"type":"stream_started","sequence":1,"timestamp":"2026-05-24T12:00:00Z","payload":{}}
+{"type":"partial","sequence":2,"timestamp":"2026-05-24T12:00:01Z","payload":{"text":"Hello from line one."}}
+{"type":"partial","sequence":3,"timestamp":"2026-05-24T12:00:02Z","payload":{"text":"Hello from line two."}}
+{"type":"completed","sequence":4,"timestamp":"2026-05-24T12:00:03Z","payload":{"reason":"completed","output":"Hello from line one.Hello from line two."}}
+```
+
+---
+
 ## 1. High-Level Data Flow
 
 ```mermaid
@@ -15,8 +63,8 @@ sequenceDiagram
     participant Outbound as PyTTSx3Adapter<br/>(Outbound Port)
     participant Subprocess as pyttsx3 Subprocess<br/>(Isolated OS Process)
 
-    Client->>Inbound: POST /process/stream (Plain Text Lines)
-    Note over Inbound: Decodes body & creates<br/>text_stream_generator()
+    Client->>Inbound: POST /process/stream (NDJSON text events)
+    Note over Inbound: Validates stream events & creates<br/>text_stream_generator()
     Inbound->>Core: process_stream(ProcessStreamRequestDto)
     Core->>Outbound: process_stream(ProcessStreamRequestDto)
     
@@ -45,11 +93,12 @@ sequenceDiagram
 ### A. The Inbound HTTP Layer (`FastApiAdapter`)
 Located in: [fastapi_adapter.py](file:///d:/Hobbys/IA/Full_Ai_Agent/tts_microservice/infrastructure/inbound/http/fastapi_adapter.py)
 
-At the entry point, the `/process/stream` endpoint receives text data from the HTTP client. The text body contains text lines separated by line breaks (`\n`). 
+At the entry point, the `/process/stream` endpoint receives NDJSON text stream events from the HTTP client. Each line must be one complete standard stream event object.
 
-1. **Reading raw request body**: Instead of waiting for a fully-parsed JSON, the adapter reads the raw request payload via `await request.body()`.
-2. **Asynchronous Text Generator**: 
-   We wrap the parsed text lines in an asynchronous generator function `text_stream_generator()`:
+1. **Reading request body**: The adapter reads the NDJSON payload via `await request.body()`.
+2. **Validating stream events**: The adapter requires `stream_started` with sequence `1`, one or more text `partial` events, and a final text `completed` event. Raw text fallback is rejected with HTTP 400.
+3. **Asynchronous Text Generator**:
+   We wrap the validated text partial payloads in an asynchronous generator function `text_stream_generator()`:
    ```python
    async def text_stream_generator() -> AsyncIterator[str]:
        for line in lines:

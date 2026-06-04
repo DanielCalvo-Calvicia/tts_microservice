@@ -66,6 +66,14 @@ def get_launch_profile_environment(profile: dict[str, Any]) -> dict[str, str]:
     return {**env_file_values, **profile_env}
 
 
+def get_launch_profile_env_file(profile: dict[str, Any]) -> Path | None:
+    env_file = profile.get("envFile")
+    if not env_file:
+        return None
+
+    return _resolve_workspace_path(env_file)
+
+
 def _environment_from_values(values: dict[str, str]) -> str | None:
     for variable_name in ENVIRONMENT_VARIABLE_PRECEDENCE:
         normalized = _normalize_environment(values.get(variable_name))
@@ -87,6 +95,30 @@ def get_launch_environment_map() -> dict[str, str]:
         environment_map[profile_name] = profile_environment or DEFAULT_ENVIRONMENT
 
     return environment_map
+
+
+def get_runtime_env_file_path(environment: str | None = None) -> Path | None:
+    resolved_environment = environment or resolve_environment()
+    launch_profile_name = os.getenv("VSCODE_LAUNCH_PROFILE")
+    fallback_profile: dict[str, Any] | None = None
+
+    for profile in get_launch_profiles():
+        profile_name = profile.get("name")
+        profile_environment = _environment_from_values(
+            get_launch_profile_environment(profile)
+        )
+
+        if profile_name == launch_profile_name:
+            return get_launch_profile_env_file(profile)
+
+        if profile_environment == resolved_environment and fallback_profile is None:
+            fallback_profile = profile
+
+    if fallback_profile is not None:
+        return get_launch_profile_env_file(fallback_profile)
+
+    default_env_file = WORKSPACE_ROOT / ".env"
+    return default_env_file if default_env_file.exists() else None
 
 
 def resolve_environment() -> str:

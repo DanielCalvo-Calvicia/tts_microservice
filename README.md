@@ -6,35 +6,38 @@ Where behavior is not explicit in code, it is marked as **Inferred** or **Needs 
 
 ## Project Overview
 
-This project implements a small Text-to-Speech HTTP microservice. It exposes a FastAPI server that accepts text, synthesizes speech using `pyttsx3`, and returns audio either as an HTTP streaming response or as a JSON payload containing base64 audio data.
+This project implements a small Text-to-Speech HTTP microservice. It exposes a FastAPI server that accepts text, synthesizes speech with a configurable outbound adapter, and returns audio either as newline-delimited JSON streaming events or as a JSON payload containing base64 audio data.
 
 The code is organized around a ports-and-adapters, or hexagonal, architecture:
 
 - Inbound adapter: FastAPI HTTP API in `infrastructure/inbound/http/fastapi_adapter.py`.
 - Application service: orchestration layer in `application/services/service.py`.
-- Outbound adapter: `pyttsx3`-backed TTS engine in `infrastructure/outbound/tts/pyttsx3_adapter.py`.
+- Outbound adapters:
+  - Local `pyttsx3` TTS engine in `infrastructure/outbound/tts/pyttsx3_adapter.py`.
+  - OpenAI-compatible audio speech API in `infrastructure/outbound/tts/openai_tts_adapter.py`.
 - Composition root: dependency wiring and server startup in `composition_root/`.
 
 Main responsibilities:
 
 - Start a FastAPI application through Uvicorn.
 - Load runtime configuration from `.env`.
-- Accept plain text through HTTP endpoints.
-- Convert text lines into async text streams.
-- Synthesize audio with `pyttsx3` in isolated subprocesses.
-- Stream generated WAV frame bytes back to clients.
+- Accept standard NDJSON text stream events through HTTP streaming endpoints.
+- Convert text `partial` events into async text streams.
+- Synthesize audio with either local `pyttsx3` subprocesses or the OpenAI speech API.
+- Stream generated audio chunks as explicit NDJSON events.
 - Support a decoupled two-step streaming flow where one request starts synthesis and another request drains the generated audio queue.
 - Provide basic health and TTS availability checks.
 
 Core business logic:
 
-- Text input is split on newline boundaries.
-- Empty lines are discarded.
-- Each non-empty text line is synthesized independently.
-- Synthesis writes a temporary `.wav` file through `pyttsx3`.
-- The service reads the temporary WAV file with Python's `wave` module in 1024-frame chunks.
+- Text stream input is sent as NDJSON standard stream events.
+- Each text `partial` payload is synthesized independently.
+- The default local adapter writes a temporary `.wav` file through `pyttsx3`.
+- The service reads local temporary WAV files with Python's `wave` module in 1024-frame chunks.
+- The OpenAI adapter streams bytes from `/audio/speech` in 8192-byte chunks.
 - Chunks are placed on an `asyncio.Queue` or yielded through an async iterator.
-- A `None` sentinel indicates end-of-stream for queue-backed audio streams.
+- The HTTP adapter wraps chunks in `partial` events and emits `completed` for each logical output.
+- Internal `None` sentinels end queue-backed audio streams, but clients must rely on `completed`, not connection close or sentinel markers.
 
 Main workflows and lifecycle:
 
@@ -44,8 +47,25 @@ Main workflows and lifecycle:
 4. `generate_tts_dependency()` creates `PyTTSx3Adapter`, `TTSService`, a FastAPI app, and `FastApiAdapter`.
 5. FastAPI routes call adapter methods, which map inbound DTOs to service DTOs.
 6. `TTSService` maps service DTOs to outbound DTOs and delegates to `PyTTSx3Adapter`.
-7. The outbound adapter invokes `pyttsx3` in subprocesses and returns audio bytes.
-8. On shutdown, Uvicorn exits, FastAPI lifespan calls `stop_autoload()`, and `setup()` calls `_cleanup()`.
+7. The outbound adapter invokes the configured TTS backend and returns audio bytes to the HTTP adapter.
+8. The HTTP adapter encodes streamed bytes as NDJSON events with monotonic sequence numbers.
+9. On shutdown, Uvicorn exits, FastAPI lifespan calls `stop_autoload()`, and `setup()` calls `_cleanup()`.
+
+## Streaming Contract
+
+`POST /process/stream`, `POST /process/stream/set`, and `GET /process/stream/get` use `application/x-ndjson` for stream contracts. Each line is one complete JSON object:
+
+```json
+{"type":"stream_started","sequence":1,"timestamp":"2026-05-24T12:00:00Z","payload":{}}
+{"type":"partial","sequence":2,"timestamp":"2026-05-24T12:00:01Z","payload":{"bytes_base64":"UklGRg=="}}
+{"type":"completed","sequence":3,"timestamp":"2026-05-24T12:00:02Z","payload":{"reason":"completed","output_bytes_base64":"UklGRg=="}}
+```
+
+Required event fields are `type`, `sequence`, `timestamp`, and `payload`. `sequence` starts at `1` and increments by `1` for every event in the stream. Timestamps are UTC ISO-8601 strings. Text input uses `partial` payloads shaped as `{"text":"..."}` and a final `completed` payload shaped as `{"reason":"completed","output":"..."}`. Binary audio output is base64 encoded in `bytes_base64` for `partial` events and `output_bytes_base64` for `completed`.
+
+Raw text stream request bodies are not accepted. Clients must send standard NDJSON stream events to `POST /process/stream` and `POST /process/stream/set`.
+
+Clients should process `completed` immediately as the end of the current logical output. The HTTP connection may remain open afterward, optionally emitting `heartbeat` events when `keep_open_after_completed=true`.
 
 ## Architecture
 
@@ -55,11 +75,14 @@ Main workflows and lifecycle:
 flowchart LR
     Client["HTTP client"] --> FastAPI["FastApiAdapter<br/>inbound HTTP adapter"]
     FastAPI --> Service["TTSService<br/>application service"]
-    Service --> Outbound["PyTTSx3Adapter<br/>outbound TTS adapter"]
-    Outbound --> Subprocess["Python subprocess<br/>pyttsx3 engine"]
+    Service --> Outbound["AdapterOutboundPort<br/>selected TTS adapter"]
+    Outbound --> Local["PyTTSx3Adapter<br/>local backend"]
+    Outbound --> Cloud["OpenAITTSAdapter<br/>HTTP speech backend"]
+    Local --> Subprocess["Python subprocess<br/>pyttsx3 engine"]
     Subprocess --> NativeTTS["OS speech engine<br/>SAPI5/espeak/NSSpeechSynthesizer"]
-    Outbound --> TempWav["Temporary .wav file"]
-    TempWav --> Outbound
+    Local --> TempWav["Temporary .wav file"]
+    TempWav --> Local
+    Cloud --> OpenAI["OpenAI-compatible<br/>/audio/speech API"]
     Outbound --> FastAPI
     FastAPI --> Client
 ```
@@ -98,10 +121,12 @@ classDiagram
     class FastApiAdapter
     class TTSService
     class PyTTSx3Adapter
+    class OpenAITTSAdapter
 
     AdapterInboundPort <|.. FastApiAdapter
     ServicePort <|.. TTSService
     AdapterOutboundPort <|.. PyTTSx3Adapter
+    AdapterOutboundPort <|.. OpenAITTSAdapter
     FastApiAdapter --> ServicePort
     TTSService --> AdapterOutboundPort
 ```
@@ -131,10 +156,19 @@ classDiagram
 `composition_root/dependencies/tts_dependency.py`
 
 - Reads outbound TTS config:
+  - `TTS_ADAPTER`, default `pyttsx3`
   - `TTS_SPEECH_RATE`, default `140`
   - `TTS_VOICE_NAME`, default `Zira`
+  - `OPENAI_API_KEY`, required when `TTS_ADAPTER=openai`
+  - `OPENAI_TTS_MODEL`, default `gpt-4o-mini-tts`
+  - `OPENAI_TTS_VOICE`, default `alloy`
+  - `OPENAI_TTS_RESPONSE_FORMAT`, default `wav`
+  - `OPENAI_TTS_INSTRUCTIONS`, optional
+  - `OPENAI_TTS_SPEED`, optional float
+  - `OPENAI_BASE_URL`, default `https://api.openai.com/v1`
 - Creates:
-  - `PyTTSx3Adapter`
+  - `PyTTSx3Adapter` when `TTS_ADAPTER=pyttsx3`
+  - `OpenAITTSAdapter` when `TTS_ADAPTER=openai`
   - `TTSService`
   - `FastAPI`
   - `FastApiAdapter`
@@ -184,6 +218,14 @@ classDiagram
 - Reads WAV frames into async queues and async iterators.
 - Stores one shared queue for the decoupled `set_stream` / `get_stream` flow.
 
+`infrastructure/outbound/tts/openai_tts_adapter.py`
+
+- Implements `AdapterOutboundPort`.
+- Uses `httpx.AsyncClient` to call an OpenAI-compatible `/audio/speech` endpoint.
+- Streams response bytes in 8192-byte chunks.
+- Supports the same streaming, decoupled streaming, batch, and availability port methods as the local adapter.
+- Stores one shared queue for the decoupled `set_stream` / `get_stream` flow.
+
 ### Dependency Graph
 
 Text form:
@@ -196,9 +238,12 @@ main.py
       -> composition_root.containers.container.BuildContainer
           -> composition_root.dependencies.tts_dependency.generate_tts_dependency
               -> FastAPI
-              -> PyTTSx3Adapter
-                  -> pyttsx3 in subprocess
-                  -> tempfile / wave / asyncio subprocess
+              -> AdapterOutboundPort implementation
+                  -> PyTTSx3Adapter
+                      -> pyttsx3 in subprocess
+                      -> tempfile / wave / asyncio subprocess
+                  -> OpenAITTSAdapter
+                      -> httpx / OpenAI-compatible audio speech API
               -> TTSService
               -> FastApiAdapter
 ```
@@ -215,21 +260,23 @@ sequenceDiagram
     participant Proc as pyttsx3 subprocess
     participant WAV as temporary WAV file
 
-    Client->>HTTP: POST /process/stream text/plain
-    HTTP->>HTTP: split body by newline, discard empty lines
+    Client->>HTTP: POST /process/stream application/x-ndjson text events
+    HTTP->>HTTP: validate NDJSON stream events
     HTTP->>Service: process_stream(ProcessStreamRequestDto)
     Service->>TTS: process_stream(ProcessStreamRequestDto)
     TTS-->>Service: AsyncAudioStream
     Service-->>HTTP: audio_stream
-    HTTP-->>Client: StreamingResponse audio/wav
+    HTTP-->>Client: StreamingResponse application/x-ndjson
 
     loop each text line
         TTS->>Proc: python -c generated pyttsx3 script
         Proc->>WAV: save_to_file(text, temp_path)
         TTS->>WAV: wave.open(temp_path)
         TTS-->>HTTP: yield 1024-frame chunks
+        HTTP-->>Client: partial event with bytes_base64
         TTS->>WAV: delete temp file
     end
+    HTTP-->>Client: completed event
 ```
 
 ## Repository Structure
@@ -288,7 +335,8 @@ Important folders and files:
 | `application/services/service.py` | Application orchestration layer. |
 | `composition_root/` | Dependency injection and app/server bootstrap. |
 | `infrastructure/inbound/http/fastapi_adapter.py` | FastAPI route definitions and HTTP request/response handling. |
-| `infrastructure/outbound/tts/pyttsx3_adapter.py` | TTS synthesis implementation using `pyttsx3`, subprocesses, temp files, and queues. |
+| `infrastructure/outbound/tts/pyttsx3_adapter.py` | Local TTS synthesis implementation using `pyttsx3`, subprocesses, temp files, and queues. |
+| `infrastructure/outbound/tts/openai_tts_adapter.py` | OpenAI-compatible TTS synthesis implementation using `httpx` and the audio speech API. |
 | `tests/simple.py` | Manual end-to-end integration test for health, availability, batch, and streaming endpoints. Requires server running. |
 | `tests/test_decoupled_stream.py` | Manual end-to-end integration test for decoupled stream endpoints. Requires server running. |
 | `README_STREAMING.md` | Existing detailed streaming architecture note. |
@@ -318,23 +366,24 @@ Code reference map:
 | `POST /process/batch` | `infrastructure/inbound/http/fastapi_adapter.py`, `handle_process_batch()` |
 | Application orchestration | `application/services/service.py`, `TTSService` |
 | DTO mapping | `application/dtos/mapper/` |
-| TTS subprocess execution | `infrastructure/outbound/tts/pyttsx3_adapter.py`, `_run_tts_subprocess()` |
+| Local TTS subprocess execution | `infrastructure/outbound/tts/pyttsx3_adapter.py`, `_run_tts_subprocess()` |
+| OpenAI-compatible TTS calls | `infrastructure/outbound/tts/openai_tts_adapter.py`, `OpenAITTSAdapter.iter_speech_chunks()` |
 | Per-request streaming iterator | `infrastructure/outbound/tts/pyttsx3_adapter.py`, `AsyncAudioStream` |
 | Decoupled queue stream iterator | `infrastructure/outbound/tts/pyttsx3_adapter.py`, `DecoupledAudioStream` |
-| Outbound adapter state and synthesis methods | `infrastructure/outbound/tts/pyttsx3_adapter.py`, `PyTTSx3Adapter` |
+| Outbound adapter state and synthesis methods | `infrastructure/outbound/tts/pyttsx3_adapter.py`, `PyTTSx3Adapter`; `infrastructure/outbound/tts/openai_tts_adapter.py`, `OpenAITTSAdapter` |
 
 ## Runtime Flow
 
 ### Startup Sequence
 
 1. `main.py` imports `setup` and calls `asyncio.run(setup())`.
-2. `setup()` searches for `.env` using `find_dotenv('.env')`.
-3. If found, `.env` is loaded.
+2. `setup()` resolves the runtime environment with `resolve_environment()`.
+3. `get_runtime_env_file_path()` selects the matching env file from `.vscode/launch.json` or falls back to `.env`.
 4. `SERVICE_HOST` is read, defaulting to `127.0.0.1`.
 5. `SERVICE_PORT` is read, defaulting to `8002`.
 6. `BuildContainer(name="TTS Microservice")` builds dependencies.
-7. `generate_tts_dependency()` reads `TTS_SPEECH_RATE` and `TTS_VOICE_NAME`.
-8. `PyTTSx3Adapter` is created.
+7. `generate_tts_dependency()` reads `TTS_ADAPTER`, local TTS settings, and OpenAI TTS settings.
+8. `PyTTSx3Adapter` or `OpenAITTSAdapter` is created from `TTS_ADAPTER`.
 9. `TTSService` is created with the outbound adapter.
 10. FastAPI app is created with docs enabled.
 11. `FastApiAdapter` is created and registers routes on the FastAPI app.
@@ -342,10 +391,10 @@ Code reference map:
 
 ### Initialization Process
 
-There is no eager TTS engine initialization during app startup. `pyttsx3` is initialized lazily inside subprocesses when:
+`TTSService.init()` runs during FastAPI lifespan startup and initializes the selected outbound adapter. For `pyttsx3`, native engine initialization remains lazy inside subprocesses. For OpenAI, adapter initialization validates configuration, including the required API key and response format.
 
 - `/available` checks engine availability.
-- `/process/stream` synthesizes each input line.
+- `/process/stream` synthesizes each input text `partial` event.
 - `/process/stream/set` starts background synthesis.
 - `/process/batch` attempts batch synthesis.
 
@@ -374,20 +423,20 @@ Streaming lifecycle:
 
 - The HTTP adapter reads the full request body with `await request.body()`.
 - It decodes the body as UTF-8.
-- It splits text on `\n`.
-- It strips each line and drops empty lines.
-- It wraps the resulting list in an async generator.
+- It parses and validates standard NDJSON text stream events.
+- It converts `partial.payload.text` values into an async text generator.
 - The outbound adapter creates an async audio stream and a background generation task.
-- Each text line produces a separate temporary WAV file.
-- WAV frames are yielded to the HTTP response.
+- Each text `partial` payload is synthesized independently by the selected backend.
+- Audio chunks are encoded as `partial` NDJSON events in the HTTP response.
+- A `completed` event marks the logical output complete even if the connection remains open.
 
 Decoupled stream lifecycle:
 
-- `POST /process/stream/set` parses the text and calls `PyTTSx3Adapter.set_stream()`.
+- `POST /process/stream/set` parses text stream events and calls the selected outbound adapter's `set_stream()`.
 - The adapter cancels any previous background generation task.
 - It replaces the shared `_audio_queue`.
 - It starts `_generate_decoupled_audio()` in an `asyncio.create_task`.
-- `GET /process/stream/get` returns a `DecoupledAudioStream` that drains the current shared queue.
+- `GET /process/stream/get` returns an adapter-specific async iterator that drains the current shared queue.
 
 ### Shutdown Behavior
 
@@ -398,7 +447,7 @@ Shutdown handling exists but is minimal:
 - `_cleanup()` currently only prints `"Performing graceful shutdown cleanup..."`.
 - FastAPI lifespan calls `adapter_inbound.stop_autoload()`, but that method is a no-op.
 - **Needs verification:** active `AsyncAudioStream` generation tasks created per streaming request are not centrally tracked for shutdown.
-- **Needs verification:** active `PyTTSx3Adapter._generator_task` for decoupled streaming is not explicitly cancelled during shutdown.
+- **Needs verification:** active outbound adapter `_generator_task` values for decoupled streaming are not explicitly cancelled during shutdown.
 
 ## Ports & Interfaces
 
@@ -414,9 +463,9 @@ Shutdown handling exists but is minimal:
   - `GET /redoc`
   - `GET /openapi.json`
 - Primary synthesis endpoints:
-  - `POST /process/stream` - plain text body to streamed WAV bytes
-  - `POST /process/stream/set` - plain text body to background synthesis queue
-  - `GET /process/stream/get` - drain background synthesis queue as streamed WAV bytes
+  - `POST /process/stream` - NDJSON text stream events to streamed NDJSON audio events
+  - `POST /process/stream/set` - NDJSON text stream events to background synthesis queue
+  - `GET /process/stream/get` - drain background synthesis queue as streamed NDJSON audio events
   - `POST /process/batch?text=...` - query-param batch text to JSON with `audio_data_base64`
 - Health endpoints:
   - `GET /health`
@@ -427,11 +476,11 @@ Shutdown handling exists but is minimal:
 | Type | Port | Protocol | Path/Topic | Purpose | Handler | Dependencies |
 | --- | ---: | --- | --- | --- | --- | --- |
 | HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /health` | Liveness-style service check | `health_check()` in `FastApiAdapter.register_routes()` | None beyond FastAPI |
-| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /available` | Check whether `pyttsx3` can initialize | `handle_check_availability()` | `TTSService.is_available()`, `PyTTSx3Adapter.is_available()`, subprocess, `pyttsx3` |
-| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `POST /process/stream` | Synthesize newline-delimited text and stream audio in same request | `handle_process_stream()` | `TTSService.process_stream()`, `PyTTSx3Adapter.process_stream()`, temp WAV files, subprocess, OS TTS engine |
-| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `POST /process/stream/set` | Start background synthesis for a single shared decoupled stream | `handle_set_stream()` | `TTSService.set_stream()`, `PyTTSx3Adapter.set_stream()`, shared queue, subprocess, temp WAV files |
-| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /process/stream/get` | Stream audio from the current shared decoupled queue | `handle_get_stream()` | `TTSService.get_stream()`, `PyTTSx3Adapter.get_stream()`, shared queue |
-| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `POST /process/batch` | Attempt batch synthesis and return base64 audio JSON | `handle_process_batch()` | `TTSService.process_batch()`, `PyTTSx3Adapter.process_batch()`, subprocess, temp WAV files |
+| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /available` | Check whether the selected TTS backend is available | `handle_check_availability()` | `TTSService.is_available()`, selected outbound adapter |
+| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `POST /process/stream` | Synthesize NDJSON text stream events and stream NDJSON audio events in same request | `handle_process_stream()` | `TTSService.process_stream()`, selected outbound adapter |
+| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `POST /process/stream/set` | Start background synthesis for a single shared decoupled stream | `handle_set_stream()` | `TTSService.set_stream()`, selected outbound adapter, shared queue |
+| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /process/stream/get` | Stream NDJSON audio events from the current shared decoupled queue | `handle_get_stream()` | `TTSService.get_stream()`, selected outbound adapter, shared queue |
+| HTTP | `SERVICE_PORT`, default `8002` | HTTP | `POST /process/batch` | Attempt batch synthesis and return base64 audio JSON | `handle_process_batch()` | `TTSService.process_batch()`, selected outbound adapter |
 | HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /docs` | Swagger UI generated by FastAPI | FastAPI built-in | OpenAPI schema |
 | HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /redoc` | ReDoc generated by FastAPI | FastAPI built-in | OpenAPI schema |
 | HTTP | `SERVICE_PORT`, default `8002` | HTTP | `GET /openapi.json` | OpenAPI JSON schema | FastAPI built-in | Route metadata |
@@ -439,7 +488,7 @@ Shutdown handling exists but is minimal:
 | CLI | N/A | Local process | `python tests/simple.py` | Manual integration test | `tests/simple.py` | Running service at `http://127.0.0.1:8002` |
 | CLI | N/A | Local process | `python tests/test_decoupled_stream.py` | Manual decoupled stream integration test | `tests/test_decoupled_stream.py` | Running service, `TTS_TEST_BASE_URL` optional |
 
-No GraphQL operations, WebSocket events, MQTT topics, serial ports, gRPC services, message queues, file watchers, webhooks, cron jobs, scheduled jobs, or internal event buses were found in the project source. The only internal async coordination primitive is `asyncio.Queue` inside `PyTTSx3Adapter`.
+No GraphQL operations, WebSocket events, MQTT topics, serial ports, gRPC services, message queues, file watchers, webhooks, cron jobs, scheduled jobs, or internal event buses were found in the project source. The only internal async coordination primitive is `asyncio.Queue` inside the outbound TTS adapters.
 
 ### `GET /health`
 
@@ -524,18 +573,23 @@ Example response:
 
 - Port: `SERVICE_PORT`, default `8002`
 - Protocol: HTTP
-- Purpose: Synthesize a newline-delimited text payload and return streamed audio bytes.
+- Purpose: Synthesize NDJSON text stream events and return newline-delimited JSON audio events.
 - Authentication: none.
 - Request format:
-  - Body: UTF-8 plain text.
-  - Lines are split with `body_str.split("\n")`.
-  - Empty or whitespace-only lines are dropped.
+  - Body: `application/x-ndjson`.
+  - Each line is one complete standard stream event JSON object.
+  - The first event must be `stream_started` with sequence `1`.
+  - Text chunks must be `partial` events with payload `{"text":"..."}`.
+  - The final input event must be `completed` with payload `{"reason":"completed","output":"..."}`.
   - Query parameters:
     - `sample_rate`, default `22050`
     - `channels`, default `1`
+    - `keep_open_after_completed`, default `false`
+    - `heartbeat_interval_seconds`, default `15.0`
 - Response format:
   - `StreamingResponse`
-  - `Content-Type`: `audio/wav`
+  - `Content-Type`: `application/x-ndjson`
+  - Body: one JSON event per line with `type`, `sequence`, `timestamp`, and `payload`.
   - Headers:
     - `Cache-Control: no-cache`
     - `Connection: keep-alive`
@@ -561,8 +615,9 @@ Example response:
   - `TTS_SPEECH_RATE`, optional, default `140`
   - `TTS_VOICE_NAME`, optional, default `Zira`
 - Failure behavior:
+  - If input is not valid standard NDJSON stream events, returns HTTP 400 JSON envelope.
   - If route setup or initial processing raises, returns HTTP 500 JSON envelope.
-  - If errors occur after streaming begins inside the async generator, client behavior is governed by ASGI streaming semantics. **Needs verification:** no explicit mid-stream error envelope is possible once bytes start streaming.
+  - If errors occur after streaming begins, the stream emits an `error` event with `code`, `message`, and `recoverable`.
   - `_run_tts_subprocess()` returns an exception object instead of raising it to the caller. Current callers do not inspect the return value, so a failed subprocess can lead to a later `wave.open()` failure or empty/missing output.
 - Timeout/retry behavior:
   - No explicit synthesis timeout.
@@ -574,16 +629,20 @@ Example:
 
 ```bash
 curl -X POST "http://127.0.0.1:8002/process/stream?sample_rate=22050&channels=1" \
-  -H "Content-Type: text/plain" \
-  --data-binary $'Hello from line one.\nHello from line two.' \
-  --output speech.wav
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary $'{"type":"stream_started","sequence":1,"timestamp":"2026-05-24T12:00:00Z","payload":{}}\n{"type":"partial","sequence":2,"timestamp":"2026-05-24T12:00:01Z","payload":{"text":"Hello from line one."}}\n{"type":"partial","sequence":3,"timestamp":"2026-05-24T12:00:02Z","payload":{"text":"Hello from line two."}}\n{"type":"completed","sequence":4,"timestamp":"2026-05-24T12:00:03Z","payload":{"reason":"completed","output":"Hello from line one.Hello from line two."}}\n'
 ```
 
 Expected response:
 
 - HTTP 200
-- Body is streamed WAV frame bytes.
-- **Needs verification:** the streamed body contains frame data read from WAV files, but the implementation reads with `wave.readframes()` and does not explicitly prepend a WAV container header to the HTTP stream.
+- Body is streamed NDJSON events. Example:
+
+```json
+{"type":"stream_started","sequence":1,"timestamp":"2026-05-24T12:00:00Z","payload":{}}
+{"type":"partial","sequence":2,"timestamp":"2026-05-24T12:00:01Z","payload":{"bytes_base64":"UklGRg=="}}
+{"type":"completed","sequence":3,"timestamp":"2026-05-24T12:00:02Z","payload":{"reason":"completed","output_bytes_base64":"UklGRg=="}}
+```
 
 ### `POST /process/stream/set`
 
@@ -592,8 +651,8 @@ Expected response:
 - Purpose: Submit text for background synthesis into one shared decoupled audio queue.
 - Authentication: none.
 - Request format:
-  - Body: UTF-8 plain text.
-  - Newline-delimited text.
+  - Body: `application/x-ndjson`.
+  - The same standard text stream event shape required by `POST /process/stream`.
   - Query parameters:
     - `sample_rate`, default `22050`
     - `channels`, default `1`
@@ -613,6 +672,7 @@ Expected response:
   - `TTS_SPEECH_RATE`, optional, default `140`
   - `TTS_VOICE_NAME`, optional, default `Zira`
 - Failure behavior:
+  - Handler returns HTTP 400 JSON envelope if input is not valid standard NDJSON stream events.
   - Handler returns HTTP 500 JSON envelope if setup fails.
   - Background task catches `asyncio.CancelledError`.
   - Background task always places `None` sentinel on the queue in `finally`.
@@ -624,8 +684,8 @@ Example:
 
 ```bash
 curl -X POST http://127.0.0.1:8002/process/stream/set \
-  -H "Content-Type: text/plain" \
-  --data-binary $'First sentence.\nSecond sentence.'
+  -H "Content-Type: application/x-ndjson" \
+  --data-binary $'{"type":"stream_started","sequence":1,"timestamp":"2026-05-24T12:00:00Z","payload":{}}\n{"type":"partial","sequence":2,"timestamp":"2026-05-24T12:00:01Z","payload":{"text":"First sentence."}}\n{"type":"partial","sequence":3,"timestamp":"2026-05-24T12:00:02Z","payload":{"text":"Second sentence."}}\n{"type":"completed","sequence":4,"timestamp":"2026-05-24T12:00:03Z","payload":{"reason":"completed","output":"First sentence.Second sentence."}}\n'
 ```
 
 Example response:
@@ -645,12 +705,17 @@ Example response:
 
 - Port: `SERVICE_PORT`, default `8002`
 - Protocol: HTTP
-- Purpose: Retrieve audio chunks from the current decoupled audio queue.
+- Purpose: Retrieve audio events from the current decoupled audio queue.
 - Authentication: none.
-- Request format: no body.
+- Request format:
+  - No body.
+  - Query parameters:
+    - `keep_open_after_completed`, default `false`
+    - `heartbeat_interval_seconds`, default `15.0`
 - Response format:
   - `StreamingResponse`
-  - `Content-Type`: `audio/wav`
+  - `Content-Type`: `application/x-ndjson`
+  - Body: one JSON event per line with `stream_started`, zero or more `partial` events, and one `completed` event per logical output.
   - Headers:
     - `Cache-Control: no-cache`
     - `Connection: keep-alive`
@@ -670,7 +735,7 @@ Example response:
 - Failure behavior:
   - If no stream has been set, the handler returns an iterator over the current empty queue and may wait indefinitely for chunks. **Needs verification.**
   - If handler setup fails, returns HTTP 500 JSON envelope.
-  - End-of-stream occurs when `None` sentinel is read.
+  - Logical completion is signaled by a `completed` event when the internal `None` sentinel is read.
 - Timeout/retry behavior:
   - No explicit timeout.
   - No retry.
@@ -679,13 +744,13 @@ Example response:
 Example:
 
 ```bash
-curl http://127.0.0.1:8002/process/stream/get --output speech.wav
+curl http://127.0.0.1:8002/process/stream/get
 ```
 
 Expected response:
 
 - HTTP 200
-- Streaming audio bytes from the shared queue.
+- Streaming NDJSON events from the shared queue.
 
 ### `POST /process/batch`
 
@@ -704,18 +769,19 @@ Expected response:
 - Internal handler: `handle_process_batch()`.
 - Dependencies triggered:
   - `TTSService.process_batch()`
-  - `PyTTSx3Adapter.process_batch()`
-  - `_run_tts_subprocess()`
-  - temporary WAV file
+  - Selected outbound adapter:
+    - `PyTTSx3Adapter.process_batch()`, `_run_tts_subprocess()`, and a temporary WAV file when `TTS_ADAPTER=pyttsx3`
+    - `OpenAITTSAdapter.process_batch()` and `/audio/speech` when `TTS_ADAPTER=openai`
 - Side effects:
-  - Creates and deletes a temporary WAV file.
-  - Current outbound implementation also writes batch chunks into the shared `_audio_queue`, which may interfere with decoupled streaming. This appears unintended.
+  - `pyttsx3`: creates and deletes a temporary WAV file.
+  - OpenAI: performs an outbound HTTP request.
 - Required environment variables:
+  - `TTS_ADAPTER`, optional, default `pyttsx3`
   - `TTS_SPEECH_RATE`, optional, default `140`
   - `TTS_VOICE_NAME`, optional, default `Zira`
+  - `OPENAI_API_KEY`, required when `TTS_ADAPTER=openai`
 - Failure behavior:
   - If `text` is empty, route raises `HTTPException(400)`, but the broad `except Exception` catches it and returns HTTP 500 instead of HTTP 400.
-  - **Known bug:** `PyTTSx3Adapter.process_batch()` reads all frames into a loop and returns `data` after the loop has ended, so the returned `audio_data` is the final empty buffer (`b""`). This means `audio_data_base64` is likely empty even after successful synthesis.
   - The included `tests/simple.py` sends JSON `{"text": ...}`, which does not match the current FastAPI signature and will not populate `text`.
 - Timeout/retry behavior:
   - No explicit timeout.
@@ -743,8 +809,6 @@ Example intended response shape:
   }
 }
 ```
-
-**Needs verification:** because of the current outbound bug, the actual `audio_data_base64` may be empty.
 
 ### Built-In FastAPI Documentation Interfaces
 
@@ -799,6 +863,35 @@ Example intended response shape:
 - Required configs:
   - `TTS_SPEECH_RATE`
   - `TTS_VOICE_NAME`
+
+### OpenAI-Compatible Speech API
+
+- Purpose: remote text-to-speech synthesis through an OpenAI-compatible HTTP API.
+- How it is used:
+  - `OpenAITTSAdapter.iter_speech_chunks()` sends `POST {OPENAI_BASE_URL}/audio/speech`.
+  - Requests include `model`, `voice`, `input`, and `response_format`.
+  - Optional `instructions` and `speed` fields are included when configured.
+  - Response bytes are streamed with `httpx` in 8192-byte chunks.
+- Authentication: bearer token from `OPENAI_API_KEY`.
+- Retry behavior: none.
+- Timeout behavior:
+  - Speech requests use an `httpx.Timeout` of 120 seconds.
+  - Availability checks use an `httpx.Timeout` of 10 seconds.
+- Failure modes:
+  - Missing `OPENAI_API_KEY` when `TTS_ADAPTER=openai`.
+  - Invalid `OPENAI_TTS_RESPONSE_FORMAT`.
+  - Network failure or timeout.
+  - API returns HTTP 4xx or 5xx.
+- Required configs:
+  - `TTS_ADAPTER=openai`
+  - `OPENAI_API_KEY`
+- Optional configs:
+  - `OPENAI_TTS_MODEL`
+  - `OPENAI_TTS_VOICE`
+  - `OPENAI_TTS_RESPONSE_FORMAT`
+  - `OPENAI_TTS_INSTRUCTIONS`
+  - `OPENAI_TTS_SPEED`
+  - `OPENAI_BASE_URL`
 
 ### OS Native TTS Backend
 
@@ -883,8 +976,9 @@ Configuration sources:
 Runtime environment resolution:
 
 - Supported values are `development`, `staging`, and `production`.
-- Precedence is `VSCODE_ENV`, then `APP_ENV`, then `VSCODE_LAUNCH_PROFILE` mapped through `.vscode/launch.json`.
+- Environment precedence is process `VSCODE_ENV`, process `APP_ENV`, then `VSCODE_LAUNCH_PROFILE` mapped through `.vscode/launch.json`.
 - `env` values in a launch profile override values from that profile's `envFile`.
+- Env-file selection uses the selected `VSCODE_LAUNCH_PROFILE` first, then the first launch profile matching the resolved environment, then `.env` as the development fallback.
 - `debug`, `dev`, `stage`, and `prod` are accepted aliases for `development`, `development`, `staging`, and `production`.
 - Missing or invalid environment values fall back to `development`, the safe default with full local diagnostics.
 
@@ -904,7 +998,7 @@ Logging behavior:
 | `staging` | `warn`, `error`, `critical` |
 | `production` | `critical` |
 
-Every application log line includes timestamp, environment, level, and module scope.
+Every application log line includes timestamp, environment, level, and module scope. Uvicorn/FastAPI server logs are always shown at `info` level or higher, including access logs, in every environment.
 
 Environment variables:
 
@@ -915,8 +1009,16 @@ Environment variables:
 | `VSCODE_LAUNCH_PROFILE` | No | None | Optional launch profile name used to map `.vscode/launch.json` to an environment. | `Python: Run (production env)` |
 | `SERVICE_HOST` | No | `127.0.0.1` | Host/interface passed to Uvicorn. | `0.0.0.0` |
 | `SERVICE_PORT` | No | `8002` | TCP port passed to Uvicorn. | `8002` |
+| `TTS_ADAPTER` | No | `pyttsx3` | Selects outbound backend. Valid values are `pyttsx3` and `openai`. | `openai` |
 | `TTS_SPEECH_RATE` | No | `140` | Speech rate passed to `engine.setProperty('rate', ...)`. Must parse as integer. | `140` |
 | `TTS_VOICE_NAME` | No | `Zira` | Preferred voice name substring used during voice selection. | `Zira` |
+| `OPENAI_API_KEY` | Required when `TTS_ADAPTER=openai` | None | Bearer token used by `OpenAITTSAdapter`. | `sk-...` |
+| `OPENAI_TTS_MODEL` | No | `gpt-4o-mini-tts` | Speech model sent to `/audio/speech`. | `gpt-4o-mini-tts` |
+| `OPENAI_TTS_VOICE` | No | `alloy` | Voice sent to `/audio/speech`. | `alloy` |
+| `OPENAI_TTS_RESPONSE_FORMAT` | No | `wav` | Audio response format. Must be `mp3`, `opus`, `aac`, `flac`, `wav`, or `pcm`. | `wav` |
+| `OPENAI_TTS_INSTRUCTIONS` | No | None | Optional style instructions passed to the speech API. | `Speak clearly.` |
+| `OPENAI_TTS_SPEED` | No | None | Optional speech speed parsed as float. | `1.0` |
+| `OPENAI_BASE_URL` | No | `https://api.openai.com/v1` | OpenAI-compatible API base URL. | `https://api.openai.com/v1` |
 | `TTS_TEST_BASE_URL` | No | `http://127.0.0.1:8002` | Used only by `tests/test_decoupled_stream.py`. | `http://127.0.0.1:8002` |
 
 Config files:
@@ -935,12 +1037,15 @@ Config files:
 
 Secrets:
 
-- No secrets are required by current code.
-- No authentication credentials or API keys were found.
+- `OPENAI_API_KEY` is required only when `TTS_ADAPTER=openai`.
+- The default `pyttsx3` backend requires no authentication credentials or API keys.
 
 Important config caveats:
 
 - `TTS_SPEECH_RATE` is cast with `int(...)`; non-integer values will fail container construction.
+- `OPENAI_TTS_SPEED` is cast with `float(...)` when set; non-float values will fail container construction.
+- `TTS_ADAPTER` must be either `pyttsx3` or `openai`.
+- `OPENAI_TTS_RESPONSE_FORMAT` is validated during OpenAI adapter initialization and must be one of `mp3`, `opus`, `aac`, `flac`, `wav`, or `pcm`.
 - To add a new launch profile, copy an existing profile in `.vscode/launch.json`, set `APP_ENV` or `VSCODE_ENV` to one of the supported environments, set `VSCODE_LAUNCH_PROFILE` to the profile name, and point `envFile` at the matching env file.
 - To add a new environment beyond `development`, `staging`, or `production`, update `SUPPORTED_ENVIRONMENTS` in `infrastructure/config.py`, add the logging threshold in `infrastructure/logger.py`, and create/update the relevant VS Code launch profile and env file.
 
@@ -993,9 +1098,10 @@ No Dockerfile or Compose file was found.
 If containerizing this service later, preserve these requirements:
 
 - Install Python dependencies from requirements file.
-- Install the OS TTS backend required by `pyttsx3`.
-- Ensure subprocess execution is allowed.
-- Ensure a writable temp directory exists.
+- If using `TTS_ADAPTER=pyttsx3`, install the OS TTS backend required by `pyttsx3`.
+- If using `TTS_ADAPTER=pyttsx3`, ensure subprocess execution is allowed.
+- If using `TTS_ADAPTER=pyttsx3`, ensure a writable temp directory exists.
+- If using `TTS_ADAPTER=openai`, provide `OPENAI_API_KEY` and outbound network access to `OPENAI_BASE_URL`.
 - Expose `SERVICE_PORT`, default `8002`.
 
 ### CI/CD Behavior
@@ -1012,8 +1118,9 @@ No CI/CD configuration was found:
 **Inferred:**
 
 - The service is intended to run as a long-lived HTTP process.
-- Deployment must provide local/native TTS capability, not a remote TTS API.
-- The service should run on a host where `pyttsx3` can initialize a compatible speech backend.
+- Deployment must provide either local/native TTS capability or an OpenAI-compatible speech API.
+- When using `pyttsx3`, the service should run on a host where `pyttsx3` can initialize a compatible speech backend.
+- When using OpenAI, deployment must provide network access to the configured API base URL.
 - `SERVICE_HOST=0.0.0.0` is likely needed for container or remote access.
 
 ## Dependencies
@@ -1026,7 +1133,7 @@ Both `requirements.windows.txt` and `requirements.linux.txt` contain:
 | `uvicorn` | `>=0.29.0` | ASGI server. |
 | `python-dotenv` | `>=1.0.1` | Loading `.env` at startup. |
 | `pydantic` | `>=2.6.4` | FastAPI dependency. Current DTOs use dataclasses, not Pydantic models. |
-| `httpx` | `>=0.27.0` | Manual integration test client. |
+| `httpx` | `>=0.27.0` | Manual integration test client and OpenAI-compatible TTS HTTP client. |
 | `pyttsx3` | `>=2.90` | Local TTS engine wrapper. |
 
 Critical version constraints:
@@ -1090,7 +1197,7 @@ Error handling strategy:
 - `is_available()` catches exceptions and returns `is_available=False`.
 - Background generator tasks catch `asyncio.CancelledError`.
 - Temporary file deletion ignores `OSError`.
-- `_run_tts_subprocess()` catches exceptions and returns the exception object, but callers do not check it. This weakens error propagation.
+- `_run_tts_subprocess()` logs and re-raises exceptions.
 
 Recovery mechanisms:
 
@@ -1110,8 +1217,8 @@ Authorization:
 
 Secrets handling:
 
-- No secrets are currently used.
-- `.env` is present in the repository and contains non-secret local config.
+- `OPENAI_API_KEY` is used when `TTS_ADAPTER=openai`.
+- `.env` is present in the repository and should contain only non-secret local config unless repository policy changes.
 
 Sensitive flows:
 
@@ -1121,13 +1228,13 @@ Sensitive flows:
 
 Exposed attack surface:
 
-- Unauthenticated HTTP endpoints can trigger CPU, process, disk, and native TTS work.
-- Each input line can spawn a subprocess.
+- Unauthenticated HTTP endpoints can trigger CPU, process, disk, native TTS, or outbound API work depending on the selected adapter.
+- With `TTS_ADAPTER=pyttsx3`, each input line can spawn a subprocess.
 - Request bodies have no explicit size limit.
 - Number of lines has no explicit limit.
 - No rate limiting.
 - No concurrency limit.
-- No synthesis timeout.
+- No local `pyttsx3` synthesis timeout.
 - FastAPI docs are publicly exposed on the bind interface.
 
 Recommended hardening for production:
@@ -1135,7 +1242,7 @@ Recommended hardening for production:
 - Add authentication or restrict network access.
 - Add request size limits.
 - Add line count and text length limits.
-- Add subprocess timeouts.
+- Add subprocess and outbound request timeouts appropriate to the selected backend.
 - Add concurrency control around synthesis.
 - Remove or reduce subprocess script logging.
 - Consider disabling `/docs` and `/redoc` in production.
@@ -1143,7 +1250,7 @@ Recommended hardening for production:
 
 ## Tests
 
-Current tests are script-style integration tests, not pytest tests.
+The repository contains both script-style integration tests and unittest-based contract tests. There is no dedicated test runner config, but the unittest files can be collected by pytest.
 
 `tests/simple.py`
 
@@ -1166,7 +1273,13 @@ Current tests are script-style integration tests, not pytest tests.
   - `GET /process/stream/get`
 - Verifies at least one chunk and non-zero bytes.
 
-There is no automated test configuration, no assertions around DTO mapping, and no unit tests for the outbound adapter.
+`tests/test_stream_contract.py`
+
+- Uses `unittest`, `httpx.ASGITransport`, and a fake `ServicePort`.
+- Does not require a live server or a real TTS backend.
+- Verifies NDJSON event shape, monotonic sequence numbers, text stream input validation, decoupled stream completion, heartbeat behavior, and structured stream error events.
+
+There is no automated test configuration, no assertions around DTO mapping, and no unit tests for real outbound adapter integrations.
 
 ## Derived Project Transfer Notes
 
@@ -1176,11 +1289,12 @@ Reusable parts:
 - DTO mapping modules provide clear boundaries for replacing adapters.
 - `TTSService` is mostly transport-agnostic and can remain stable.
 - `FastApiAdapter` route structure can be reused for another TTS engine.
-- `AdapterOutboundPort` is the key abstraction for swapping `pyttsx3` with cloud TTS, another local engine, or a mock engine.
+- `AdapterOutboundPort` is the key abstraction for swapping between `pyttsx3`, OpenAI-compatible TTS, another engine, or a mock engine.
 
 Tightly coupled parts:
 
 - `PyTTSx3Adapter` is tightly coupled to local subprocess execution, temp WAV files, and the behavior of `pyttsx3`.
+- `OpenAITTSAdapter` is tightly coupled to OpenAI-compatible `/audio/speech` and `/models/{model}` endpoints.
 - `README_STREAMING.md` and comments assume Windows SAPI5/COM behavior, though requirements include a Linux file too.
 - `.vscode` settings are tightly coupled to the checked-in `windows` virtual environment.
 - The decoupled streaming design is tightly coupled to a single shared in-memory queue.
@@ -1189,7 +1303,7 @@ Assumptions found in code:
 
 - Text input is UTF-8.
 - Text lines are independent synthesis units.
-- WAV frame chunks can be streamed as `audio/wav` without explicit container header handling. **Needs verification.**
+- WAV frame chunks are sent to clients as base64 fields inside NDJSON events, not as raw HTTP audio bytes.
 - `sample_rate` and `channels` are accepted at API boundaries but not applied to `pyttsx3` output. They are currently metadata/control placeholders.
 - A preferred voice can be selected by checking whether `TTS_VOICE_NAME` is a substring of `voice.name` or whether `'en'` is in `voice.id`.
 - The current Python executable has all dependencies needed for subprocess synthesis.
@@ -1197,8 +1311,8 @@ Assumptions found in code:
 What must be preserved for compatibility:
 
 - Default bind config: `127.0.0.1:8002`.
-- Plain text input for `/process/stream` and `/process/stream/set`.
-- Newline-delimited text splitting.
+- NDJSON stream-event input for `/process/stream` and `/process/stream/set`.
+- Text `partial` event chunking, where each `partial.payload.text` value is an independent synthesis unit.
 - Response envelope fields for JSON endpoints:
   - `action`
   - `status`
@@ -1206,7 +1320,7 @@ What must be preserved for compatibility:
   - `message`
   - `timestamp`
   - `data`
-- Streaming endpoints returning `audio/wav`.
+- Streaming endpoints returning `application/x-ndjson` events with `stream_started`, `partial`, `completed`, optional `heartbeat`, and `error`.
 - `/docs`, `/redoc`, and `/openapi.json` if clients rely on interactive docs.
 - Decoupled flow contract:
   - set with `POST /process/stream/set`
@@ -1230,29 +1344,28 @@ Safe refactoring boundaries:
 
 Hidden coupling or implicit behavior:
 
-- `PyTTSx3Adapter.process_batch()` writes chunks to `_audio_queue`, coupling batch synthesis to decoupled streaming state.
 - The decoupled queue is a singleton per service process.
 - `GET /process/stream/get` depends on prior `POST /process/stream/set` but does not validate that a stream exists.
-- Subprocess scripts use `sys.executable`, so the parent interpreter environment determines child dependencies.
+- `pyttsx3` subprocess scripts use `sys.executable`, so the parent interpreter environment determines child dependencies.
 - `sample_rate` and `channels` flow through DTOs but do not affect synthesis output.
 - Broad exception handling converts some client errors into HTTP 500.
 
 If rebuilding this project from scratch, what matters most:
 
 1. Preserve the inbound HTTP contracts that clients use.
-2. Decide whether audio responses should be valid standalone WAV files or raw WAV frame bytes.
+2. Preserve the explicit streaming event contract so clients never rely on connection close for logical completion.
 3. Keep TTS engine execution isolated from the event loop.
 4. Add explicit limits and timeouts around synthesis.
-5. Make batch synthesis return accumulated bytes instead of the final empty buffer.
+5. Keep batch synthesis returning accumulated audio bytes.
 6. Decide whether decoupled streaming is single global queue, per-client session, or broadcast.
-7. Treat native TTS setup as a deployment dependency.
+7. Treat native TTS setup or OpenAI API access as deployment dependencies.
 8. Preserve the adapter boundary if future projects may swap TTS providers.
 
 ## Unknowns / Technical Debt
 
 Ambiguous behavior:
 
-- Whether streaming responses are valid full WAV files or raw frame streams labeled as `audio/wav`.
+- Whether the base64 event payloads should continue to contain raw PCM frames or move to full standalone audio containers.
 - Whether Linux/macOS support has been tested.
 - Whether `.env.production` is expected to exist.
 - Whether `sample_rate` and `channels` are intended future controls or should affect actual output.
@@ -1278,11 +1391,8 @@ Risk areas:
 
 Concrete code issues found:
 
-- `PyTTSx3Adapter.process_batch()` returns the final empty `data` value after reading all WAV frames instead of accumulating the chunks into `audio_data`.
-- `PyTTSx3Adapter.process_batch()` writes batch chunks into the shared decoupled `_audio_queue`.
 - `FastApiAdapter.handle_process_batch()` catches `HTTPException(400)` and converts it to HTTP 500.
 - `tests/simple.py` sends JSON to `/process/batch`, but the current endpoint expects query parameters.
-- `_run_tts_subprocess()` returns exceptions, but callers do not inspect the returned value.
 - Inbound DTO files contain mojibake-style comment separators, likely caused by encoding mismatch in box-drawing comments.
 
 Needs verification:

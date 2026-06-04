@@ -2,6 +2,7 @@ from application.ports.service_port import ServicePort
 from application.ports.adapter_outbound_port import AdapterOutboundPort
 
 from application.dtos.services_dtos import (
+    InitServiceDto as ServiceInitRequest,
     ProcessStreamRequestDto as ServiceStreamRequest,
     ProcessStreamResponseDto as ServiceStreamResponse,
     ProcessBatchRequestDto as ServiceBatchRequest,
@@ -14,6 +15,7 @@ from application.dtos.services_dtos import (
 )
 
 from application.dtos.mapper.service_to_adapter_outbound import (
+    map_service_to_outbound_init_request,
     map_service_to_outbound_stream_request,
     map_service_to_outbound_batch_request,
     map_service_to_outbound_availability_request,
@@ -37,6 +39,12 @@ class TTSService(ServicePort):
         self.name = name
         self.outbound_port = outbound_port
         logger.info("TTSService initialized name=%s outbound_port=%s", name, type(outbound_port).__name__)
+
+    async def init(self, request: ServiceInitRequest) -> None:
+        logger.info("TTSService.init started outbound_port=%s", type(self.outbound_port).__name__)
+        outbound_req = map_service_to_outbound_init_request(request)
+        await self.outbound_port.init(outbound_req)
+        logger.info("TTSService.init finished")
 
     async def process_stream(self, request: ServiceStreamRequest) -> ServiceStreamResponse:
         logger.info(

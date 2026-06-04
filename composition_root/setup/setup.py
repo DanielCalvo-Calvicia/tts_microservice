@@ -1,10 +1,10 @@
 import asyncio
 import os
 import uvicorn
-from dotenv import load_dotenv, find_dotenv
+from dotenv import load_dotenv
 
 from composition_root.containers.container import BuildContainer, Container
-from infrastructure.config import resolve_environment
+from infrastructure.config import get_runtime_env_file_path, resolve_environment
 from infrastructure.logger import configure_logging, get_logger
 
 logger = get_logger(__name__)
@@ -20,7 +20,7 @@ async def setup():
     logger.info("Setup started environment=%s", environment)
 
     # Load environment variables
-    dotenv_path = find_dotenv('.env')
+    dotenv_path = get_runtime_env_file_path(environment)
     if dotenv_path:
         logger.info("Loading environment variables from %s", dotenv_path)
         load_dotenv(dotenv_path)
@@ -46,7 +46,8 @@ async def setup():
         app, 
         host=host, 
         port=port, 
-        log_level="critical" if environment == "production" else "warning" if environment == "staging" else "trace",
+        log_level="info",
+        access_log=True,
         timeout_keep_alive=60,
     )
     server = uvicorn.Server(config)

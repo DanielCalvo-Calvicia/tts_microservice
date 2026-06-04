@@ -10,6 +10,12 @@ ENVIRONMENT_LOG_LEVELS = {
     "staging": logging.WARNING,
     "production": logging.CRITICAL,
 }
+ALWAYS_VISIBLE_LOGGERS = (
+    "fastapi",
+    "uvicorn",
+    "uvicorn.access",
+    "uvicorn.error",
+)
 
 
 class _EnvironmentFormatter(logging.Formatter):
@@ -60,6 +66,11 @@ class Logger:
         handler.setFormatter(_EnvironmentFormatter(resolved_environment))
         root_logger.addHandler(handler)
 
+        for logger_name in ALWAYS_VISIBLE_LOGGERS:
+            visible_logger = logging.getLogger(logger_name)
+            visible_logger.setLevel(logging.INFO)
+            visible_logger.propagate = True
+
         cls._configured_environment = resolved_environment
         return resolved_environment
 
@@ -74,7 +85,7 @@ def _trace(self: logging.Logger, message: str, *args, **kwargs) -> None:
 
 
 logging.addLevelName(TRACE_LEVEL, "TRACE")
-logging.Logger.trace = _trace
+setattr(logging.Logger, "trace", _trace)
 
 
 def configure_logging(environment: str | None = None) -> str:

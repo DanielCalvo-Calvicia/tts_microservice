@@ -1,6 +1,5 @@
-import logging
-
 from application.dtos.services_dtos import (
+    InitServiceDto as ServiceInitRequest,
     ProcessStreamRequestDto as ServiceStreamRequest,
     ProcessBatchRequestDto as ServiceBatchRequest,
     TTSAvailabilityRequestDto as ServiceAvailabilityRequest,
@@ -8,15 +7,38 @@ from application.dtos.services_dtos import (
     GetStreamRequestDto as ServiceGetStreamRequest,
 )
 from application.dtos.adapter_outbound_dtos import (
+    InitOutboundAdapterDto as OutboundInitRequest,
     ProcessStreamRequestDto as OutboundStreamRequest,
     ProcessBatchRequestDto as OutboundBatchRequest,
     TTSAvailabilityRequestDto as OutboundAvailabilityRequest,
     SetStreamRequestDto as OutboundSetStreamRequest,
     GetStreamRequestDto as OutboundGetStreamRequest,
 )
+from infrastructure.logger import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
+
+
+def map_service_to_outbound_init_request(
+    request: ServiceInitRequest,
+) -> OutboundInitRequest:
+    logger.info(
+        "Mapping service init request to outbound request openai_model=%s openai_voice=%s",
+        request.openai_model,
+        request.openai_voice,
+    )
+    return OutboundInitRequest(
+        speech_rate=request.speech_rate,
+        voice_name_preference=request.voice_name_preference,
+        openai_api_key=request.openai_api_key,
+        openai_model=request.openai_model,
+        openai_voice=request.openai_voice,
+        openai_response_format=request.openai_response_format,
+        openai_instructions=request.openai_instructions,
+        openai_speed=request.openai_speed,
+        openai_base_url=request.openai_base_url,
+    )
 
 
 def map_service_to_outbound_stream_request(
