@@ -1,15 +1,14 @@
 import asyncio
 
-from composition_root.setup.setup import setup
-from infrastructure.config import resolve_environment
-from infrastructure.logger import configure_logging, get_logger
+from main_flow.http import run_http
 
-logger = get_logger(__name__)
+
+def main() -> None:
+    try:
+        asyncio.run(run_http())
+    except KeyboardInterrupt:
+        pass  # Ctrl+C: uvicorn already shut down gracefully and cleanup ran
+
 
 if __name__ == "__main__":
-    environment = configure_logging(resolve_environment())
-    try:
-        logger.info("TTS microservice entrypoint invoked environment=%s", environment)
-        asyncio.run(setup())
-    except KeyboardInterrupt:
-        logger.info("Keyboard interrupt received. Exiting.")
+    main()
