@@ -2,7 +2,7 @@
 
 Port **8002**. Python/FastAPI. Text to speech. Status: working, needs retest after recent changes. See `README.md` and `../CLAUDE.md`.
 
-Current state (2026-10-01): branch `feature_ai_claude_2`, working tree clean, **1 commit ahead of `origin/feature_ai_claude_2` (not pushed)**. Last commit `6a2f3d2` "TTS: Piper neural voice (en_GB-alan-medium) with droid effect, pyttsx3 fallback" (before it `3653f74` "Bundle contracts 0.9.0"). Tests: `100 passed, 1 warning`. A real fresh-machine deploy of this service ran on Python 3.11 and 3.14 (see the deployment memory); the sound was not judged by ear and ruff (28 findings from the microphone venv) / mypy are not clean or installed here.
+Current state (2026-10-01): branch `feature_ai_claude_2`, tracks `origin/feature_ai_claude_2`, in sync, working tree clean. Last feature commit `d6462e6` "Bundle contracts 0.10.0; refresh docs; fix the upload ack docstring" (pushed); the Piper commit `6a2f3d2` ("TTS: Piper neural voice (en_GB-alan-medium) with droid effect, pyttsx3 fallback") was pushed with it, so a deploy from the remote now has Piper. Tests: `100 passed, 1 warning`. A real fresh-machine deploy of this service ran on Python 3.11 and 3.14 (see the deployment memory); the sound was not judged by ear and ruff (28 findings from the microphone venv) / mypy are not clean or installed here.
 
 ## Role
 
