@@ -43,7 +43,7 @@ class InputStreamResponse(Response):
     """Acknowledges an upload at once, keeps the request readable while it lasts, then reports.
 
     The response starts with ``stream_started`` (HTTP 202), stays open while the request body is
-    consumed in the background and ends with ``completed`` (``end_of_input``) or ``error``. It has
+    consumed in the background and ends with ``input_completed`` (``end_of_input``, contract ``UPLOAD_ACK``) or ``error``. It has
     to stay open: once a response completes the ASGI server stops delivering the request body.
     """
 

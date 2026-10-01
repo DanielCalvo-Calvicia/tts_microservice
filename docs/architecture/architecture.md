@@ -1,7 +1,7 @@
 # Architecture
 
 TTS Microservice follows the same Clean Architecture layout as `microphone_microservice`.
-It supersedes the docs in `docs/old/`.
+It supersedes the docs in `docs/old/`. Reviewed against the code on 2026-10-01 (branch `feature_ai_claude_2`, commit `6a2f3d2`).
 
 ## Layers and dependency rule
 
@@ -14,12 +14,14 @@ Source-code dependencies point inward only. Runtime calls go outward (HTTP → s
 through ports owned by `application`.
 
 ```
-TtsHandler ──▶ TtsSynthesisPort ◀── TtsService ──▶ SpeechSynthesisPort ◀── Pyttsx3SpeechSynthesis ──▶ Pyttsx3Subprocess ──▶ pyttsx3
-(inbound)      (driving port)       (application)    (driven port)          (outbound)                 (subprocess)
-                                         │
+TtsHandler ──▶ TtsSynthesisPort ◀── TtsService ──▶ SpeechSynthesisPort ◀── PiperSpeechSynthesis ──▶ PiperEngine ──▶ piper (ONNX) + droid_voice (numpy)
+(inbound)      (driving port)       (application)    (driven port)          (outbound, default)                       ◀── Pyttsx3SpeechSynthesis ──▶ Pyttsx3Subprocess ──▶ pyttsx3
+                                         │                                                                               (outbound, fallback)
                                          ▼
-                              domain: AudioFormat, text rules
+                              domain: AudioFormat, text rules, PCM conversion
 ```
+
+`composition_root/dependencies/tts_dependencies.py` picks the engine from `TTS_ENGINE` (`piper` default). If the Piper voice file is missing or does not load (`SynthesisFailed`), it logs an error and uses pyttsx3 instead, so the service always starts. The Piper voice (about 60 MB) is not in git or pip: `scripts/fetch_voice.py` downloads it into `models/` (run by the deployment `prepare` step).
 
 `tests/architecture/test_dependency_rules.py` enforces this by parsing imports:
 
@@ -40,10 +42,11 @@ main_flow/
   http.py                         .env -> config -> container -> uvicorn
 domain/
   errors.py                       DomainError, InvalidAudioFormat, EmptyText
+  operations/pcm.py               convert_pcm16 (sample rate and channel conversion)
   value_objects/audio_format.py   AudioFormat(sample_rate, channels) — all fields > 0
   operations/text.py              is_speakable, require_speakable
 application/
-  errors.py                       ApplicationError, SynthesisFailed
+  errors.py                       ApplicationError, SynthesisFailed, AudioFormatMismatch
   dtos/                           ProcessStreamInboundDTO, ProcessBatchInboundDTO,
                                   AudioStreamOutboundDTO, AudioBatchOutboundDTO
   ports/inbound/tts_synthesis_port.py       TtsSynthesisPort (driving)
@@ -51,7 +54,9 @@ application/
   services/tts_service.py         TtsService — validates, skips blank texts, owns the shared stream
 infrastructure/
   config/                         ServerConfig, TtsConfig (env -> frozen dataclasses)
-  inbound/http/                   http_handler.py (TtsHandler), http_envelope.py, http_error_mapper.py
+  inbound/http/                   http_handler.py (TtsHandler), http_envelope.py, http_error_mapper.py,
+                                  ndjson_text_input.py (TTS inbound events -> texts), audio_events.py (audio -> TTS outbound events),
+                                  input_stream_response.py (the ack stream of /process/stream/set)
   outbound/piper_speech/          piper_speech_synthesis.py (default engine: pitch, droid effect, format),
                                   piper_engine.py (the only module that drives Piper), droid_voice.py (numpy effect chain)
   outbound/pyttsx3_speech/        pyttsx3_speech_synthesis.py (temp WAV -> PCM chunks),
@@ -91,12 +96,16 @@ tests/  domain/ application/ infrastructure/ composition_root/ architecture/   (
 ## Deliberate changes
 
 * `AudioFormat` rejects a non-positive `sample_rate` or `channels` (they used to be ignored).
+* **Contract streams (since the 2026-09-20 commit).** Text arrives as `TTS_INBOUND` NDJSON events and audio leaves as `TTS_OUTBOUND` events; the upload answers with an ack stream ending in `input_completed`. Engine output is converted to the requested sample rate and channels (`domain.operations.pcm.convert_pcm16`), so the earlier "echoed, not applied" limitation is gone.
+* **Natural HTTP statuses** (`http_error_mapper.py`): 400 blank text, 422 invalid or mismatching format, 502 engine failure, else 500.
+* **Piper default (commit `6a2f3d2`).** Piper `en_GB-alan-medium` plus the numpy droid effect (`droid_voice.py`: pitch lift by resampling, brightness, comb echoes, ring modulation), with pyttsx3 as fallback. New settings: `TTS_ENGINE`, `TTS_PIPER_VOICE`, `TTS_PIPER_MODEL_DIR`, `TTS_PIPER_SPEED`, `TTS_PITCH_SEMITONES`, `TTS_DROID_EFFECT`; `TTS_SPEECH_RATE` and `TTS_VOICE_NAME` are pyttsx3-only.
 
 ## Known remaining debt
 
-1. Domain errors are not mapped to 4xx (`InvalidAudioFormat` → 422, `SynthesisFailed` → 502); see `http_error_mapper.py`, decision D4.
-2. The requested `sample_rate` and `channels` are validated and echoed but not applied: pyttsx3 writes its own WAV format.
-3. `process_stream`/`get_stream` are labelled `audio/wav` but carry headerless PCM.
-4. A synthesis failure ends a stream quietly (it is logged); a client cannot tell it from a normal end.
-5. `TTS_ADAPTER` and the `OPENAI_*` variables in local `.env*` files are read nowhere; only pyttsx3 exists.
+1. (Resolved) Domain/application errors map to 400/422/502 (see above).
+2. (Resolved) The requested `sample_rate` and `channels` are applied by conversion.
+3. `POST /process/stream` is labelled `audio/wav` but carries headerless PCM (`GET /process/stream/get` uses NDJSON events).
+4. (Resolved) A failed text now produces a recoverable `error` event (`synthesis_failed`) on `get`; the stream carries on.
+5. The old notes said `TTS_ADAPTER` and `OPENAI_*` variables sit in the local `.env*` files and are read nowhere; the code reads none of them (the `.env` files were not opened). Only Piper and pyttsx3 exist.
 6. `tests/simple.py` is an end-to-end script that needs a running service.
+7. The droid effect values are tuned on paper and by tests, not by ear (`scripts/render_samples.py` writes samples to `models/samples/` for listening).
