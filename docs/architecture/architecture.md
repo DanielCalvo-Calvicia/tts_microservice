@@ -52,6 +52,8 @@ application/
 infrastructure/
   config/                         ServerConfig, TtsConfig (env -> frozen dataclasses)
   inbound/http/                   http_handler.py (TtsHandler), http_envelope.py, http_error_mapper.py
+  outbound/piper_speech/          piper_speech_synthesis.py (default engine: pitch, droid effect, format),
+                                  piper_engine.py (the only module that drives Piper), droid_voice.py (numpy effect chain)
   outbound/pyttsx3_speech/        pyttsx3_speech_synthesis.py (temp WAV -> PCM chunks),
                                   pyttsx3_subprocess.py (the only module that drives pyttsx3)
 composition_root/

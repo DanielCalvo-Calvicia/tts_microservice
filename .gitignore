@@ -141,3 +141,6 @@ ehthumbs.db
 *.swp
 *~
 !.env.example
+
+# Piper voice models (about 60 MB each), fetched at deploy time
+models/

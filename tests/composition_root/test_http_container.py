@@ -16,7 +16,9 @@ def test_container_wires_an_app_that_answers_health():
 def test_container_uses_the_configured_voice_and_rate():
     container = http_container.new_http_container(
         ServerConfig.from_env({}),
-        TtsConfig.from_env({"TTS_SPEECH_RATE": "180", "TTS_VOICE_NAME": "David"}),
+        TtsConfig.from_env(
+            {"TTS_ENGINE": "pyttsx3", "TTS_SPEECH_RATE": "180", "TTS_VOICE_NAME": "David"}
+        ),
     )
 
     synthesizer = container.tts._synthesis._synthesizer  # type: ignore[attr-defined]
