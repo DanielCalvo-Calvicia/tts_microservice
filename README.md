@@ -23,7 +23,13 @@ Configuration is read from the environment (a `.env` file is loaded if present);
 | `SERVICE_HOST` | `127.0.0.1` | Bind address |
 | `SERVICE_PORT` | `8002` | Bind port |
 | `LOG_LEVEL` | `INFO` | Read by the shared logging module (`TRACE`, `DEBUG`, `INFO`, `WARN`/`WARNING`, `ERROR`, `CRITICAL`) |
-| `TTS_ENGINE` | `piper` | `piper` or `pyttsx3`; anything else fails at startup with a `ValueError` |
+| `TTS_ENGINE` | `piper` | `piper`, `espeak` (a real machine voice, formant synthesis) or `pyttsx3`; anything else fails at startup with a `ValueError` |
+| `TTS_ESPEAK_COMMAND` | empty | espeak only: the program; empty = `espeak-ng` if installed, else `espeak` |
+| `TTS_ESPEAK_VOICE` | `en` | espeak only: voice and variant (`en+m3`, `en+klatt3`, `en+croak` ...; `espeak --voices` lists them) |
+| `TTS_ESPEAK_SPEED` | `150` | espeak only: words per minute, 80-390 |
+| `TTS_ESPEAK_PITCH` | `30` | espeak only: 0-99, lower is deeper |
+| `TTS_ESPEAK_WORD_GAP_MS` | `20` | espeak only: extra silence between words, in milliseconds |
+| `TTS_ROBOT_EFFECT` | `1.0` | espeak only: ring modulation, sample hold and bit crush: `0` off, `1` default, `3` maximum |
 | `TTS_PIPER_VOICE` | `en_GB-alan-medium` | Piper voice name |
 | `TTS_PIPER_MODEL_DIR` | `models` | Folder with `<voice>.onnx` and `<voice>.onnx.json` (relative to the service) |
 | `TTS_PIPER_SPEED` | `1.0` | Pace multiplier (`1.1` = a little brisker); must be > 0 |

@@ -7,6 +7,7 @@ import pytest
 from composition_root.dependencies import tts_dependencies as deps
 from domain.value_objects.audio_format import AudioFormat
 from infrastructure.config.tts_config import TtsConfig
+from infrastructure.outbound.espeak_speech.espeak_speech_synthesis import EspeakSpeechSynthesis
 from infrastructure.outbound.piper_speech.piper_speech_synthesis import PiperSpeechSynthesis
 from infrastructure.outbound.pyttsx3_speech.pyttsx3_speech_synthesis import Pyttsx3SpeechSynthesis
 
@@ -72,3 +73,34 @@ def test_the_real_alan_voice_speaks():
 
     assert 24000 * 2 * 1.5 < len(audio) < 24000 * 2 * 8  # between 1.5 and 8 seconds of speech
     assert any(audio)
+
+
+def test_espeak_is_chosen_when_it_loads(monkeypatch):
+    class FakeLoaded:
+        sample_rate = 22050
+
+        def synthesize(self, text, speed):
+            raise AssertionError("not spoken in this test")
+
+    asked = []
+    monkeypatch.setattr(
+        deps.EspeakEngine, "load", lambda command, **options: asked.append((command, options)) or FakeLoaded()
+    )
+
+    synthesis = deps.new_speech_synthesis(
+        TtsConfig.from_env({"TTS_ENGINE": "espeak", "TTS_ESPEAK_VOICE": "en+m3", "TTS_ESPEAK_PITCH": "5"})
+    )
+
+    assert isinstance(synthesis, EspeakSpeechSynthesis)
+    assert asked[0][0] == ""
+    assert asked[0][1]["voice"] == "en+m3" and asked[0][1]["pitch"] == 5
+
+
+def test_a_missing_espeak_falls_back_to_pyttsx3(monkeypatch):
+    from infrastructure.outbound.espeak_speech import espeak_engine
+
+    monkeypatch.setattr(espeak_engine.shutil, "which", lambda name: None)
+
+    synthesis = deps.new_speech_synthesis(TtsConfig.from_env({"TTS_ENGINE": "espeak"}))
+
+    assert isinstance(synthesis, Pyttsx3SpeechSynthesis)

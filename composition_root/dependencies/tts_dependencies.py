@@ -7,6 +7,8 @@ from application.ports.outbound.speech_synthesis_port import SpeechSynthesisPort
 from application.services.tts_service import TtsService
 from infrastructure.config.tts_config import TtsConfig
 from infrastructure.inbound.http.http_handler import TtsHandler
+from infrastructure.outbound.espeak_speech.espeak_engine import EspeakEngine
+from infrastructure.outbound.espeak_speech.espeak_speech_synthesis import EspeakSpeechSynthesis
 from infrastructure.outbound.piper_speech.piper_engine import PiperEngine
 from infrastructure.outbound.piper_speech.piper_speech_synthesis import PiperSpeechSynthesis
 from infrastructure.outbound.pyttsx3_speech.pyttsx3_speech_synthesis import (
@@ -18,11 +20,26 @@ logger = get_logger(__name__)
 
 
 def new_speech_synthesis(cfg: TtsConfig) -> SpeechSynthesisPort:
-    """The configured engine. A Piper voice that cannot be loaded falls back to pyttsx3, loudly.
+    """The configured engine. A Piper voice or an espeak that cannot be loaded falls back to pyttsx3, loudly.
 
     Brain's startup preflight waits for this service and exits when it is not ready, so a machine whose voice
     download failed must still speak (with the old voice) instead of taking the whole robot down.
     """
+    if cfg.engine == "espeak":
+        try:
+            return EspeakSpeechSynthesis(
+                EspeakEngine.load(
+                    cfg.espeak_command,
+                    voice=cfg.espeak_voice,
+                    words_per_minute=cfg.espeak_speed,
+                    pitch=cfg.espeak_pitch,
+                    word_gap_ms=cfg.espeak_word_gap_ms,
+                ),
+                speed=1.0,
+                effect_strength=cfg.robot_effect,
+            )
+        except SynthesisFailed as error:
+            logger.error("espeak unavailable; falling back to pyttsx3", reason=str(error))
     if cfg.engine == "piper":
         try:
             return PiperSpeechSynthesis(
