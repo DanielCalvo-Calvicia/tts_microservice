@@ -169,7 +169,7 @@ class TtsHandler:
         try:
             await self._port.set_stream(
                 ProcessStreamInboundDTO(
-                    text_stream=tracked, sample_rate=sample_rate, channels=channels
+                    text_stream=tracked.stream(), sample_rate=sample_rate, channels=channels
                 )
             )
         except Exception as error:

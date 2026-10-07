@@ -25,6 +25,9 @@ class TrackedTexts:
     def __aiter__(self) -> AsyncIterator[str]:
         return self._iterate()
 
+    def stream(self) -> AsyncIterator[str]:
+        return self._iterate()
+
     async def wait_finished(self) -> None:
         await self._finished.wait()
 

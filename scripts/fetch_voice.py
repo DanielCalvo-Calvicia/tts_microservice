@@ -50,7 +50,7 @@ def fetch(model_dir: Path, voice: str) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser = argparse.ArgumentParser(description=(__doc__ or "").splitlines()[0])
     parser.add_argument("--voice", help="voice name; default TTS_PIPER_VOICE")
     args = parser.parse_args()
 
