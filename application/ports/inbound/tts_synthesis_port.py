@@ -41,3 +41,8 @@ class TtsSynthesisPort(ABC):
     @abstractmethod
     async def is_available(self) -> bool:
         """True if the speech engine works."""
+
+    def fallback_reason(self) -> str | None:
+        """Why a fallback voice speaks instead of the configured engine, or None when the configured
+        engine speaks. A note for callers of ``/available``; it does not change ``is_available``."""
+        return None

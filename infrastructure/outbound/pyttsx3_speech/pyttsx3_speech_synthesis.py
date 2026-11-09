@@ -31,8 +31,9 @@ class WavSynthesizer(Protocol):
 
 
 class Pyttsx3SpeechSynthesis(SpeechSynthesisPort):
-    def __init__(self, synthesizer: WavSynthesizer) -> None:
+    def __init__(self, synthesizer: WavSynthesizer, fallback_reason: str | None = None) -> None:
         self._synthesizer = synthesizer
+        self._fallback_reason = fallback_reason
 
     async def synthesize_stream(
         self, text_stream: AsyncIterator[str], audio_format: AudioFormat
@@ -52,6 +53,9 @@ class Pyttsx3SpeechSynthesis(SpeechSynthesisPort):
 
     async def is_available(self) -> bool:
         return await self._synthesizer.is_working()
+
+    def fallback_reason(self) -> str | None:
+        return self._fallback_reason
 
     async def _pcm_chunks(self, text: str, audio_format: AudioFormat) -> AsyncIterator[bytes]:
         """Speak ``text`` into a temporary WAV file and yield its PCM in the requested format.

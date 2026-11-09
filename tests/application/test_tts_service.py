@@ -128,6 +128,15 @@ def test_availability_comes_from_the_engine():
     asyncio.run(run())
 
 
+def test_the_fallback_reason_comes_from_the_engine_and_is_none_by_default():
+    class FallbackSynthesis(FakeSynthesis):
+        def fallback_reason(self) -> str | None:
+            return "fallback: pyttsx3 instead of piper (no voice)"
+
+    assert TtsService(FakeSynthesis()).fallback_reason() is None
+    assert TtsService(FallbackSynthesis()).fallback_reason() == "fallback: pyttsx3 instead of piper (no voice)"
+
+
 def test_set_stream_returns_at_once_and_get_stream_delivers_the_audio():
     async def run() -> None:
         service = TtsService(FakeSynthesis())

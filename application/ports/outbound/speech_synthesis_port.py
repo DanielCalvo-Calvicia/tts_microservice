@@ -35,6 +35,13 @@ class SpeechSynthesisPort(ABC):
     async def is_available(self) -> bool:
         """True if the engine can be started."""
 
+    def fallback_reason(self) -> str | None:
+        """Why this engine speaks instead of the configured one, or None when it is the configured one.
+
+        Reported by ``GET /available`` (ADR-008); it never changes ``is_available``.
+        """
+        return None
+
     async def synthesize_segments(
         self, text_stream: AsyncIterator[str], audio_format: AudioFormat
     ) -> AsyncIterator[AudioSegmentEvent]:

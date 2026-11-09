@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from shared_logging import TracingMiddleware, get_logger
 
@@ -18,6 +20,8 @@ from infrastructure.outbound.pyttsx3_speech.pyttsx3_subprocess import Pyttsx3Sub
 
 logger = get_logger(__name__)
 
+_MAX_CAUSE = 200
+
 
 def new_speech_synthesis(cfg: TtsConfig) -> SpeechSynthesisPort:
     """The configured engine. A Piper voice or an espeak that cannot be loaded falls back to pyttsx3, loudly.
@@ -25,6 +29,7 @@ def new_speech_synthesis(cfg: TtsConfig) -> SpeechSynthesisPort:
     Brain's startup preflight waits for this service and exits when it is not ready, so a machine whose voice
     download failed must still speak (with the old voice) instead of taking the whole robot down.
     """
+    fallback_reason: str | None = None
     if cfg.engine == "espeak":
         try:
             return EspeakSpeechSynthesis(
@@ -40,6 +45,7 @@ def new_speech_synthesis(cfg: TtsConfig) -> SpeechSynthesisPort:
             )
         except SynthesisFailed as error:
             logger.error("espeak unavailable; falling back to pyttsx3", reason=str(error))
+            fallback_reason = _fallback_reason("espeak", error)
     if cfg.engine == "piper":
         try:
             return PiperSpeechSynthesis(
@@ -50,14 +56,32 @@ def new_speech_synthesis(cfg: TtsConfig) -> SpeechSynthesisPort:
             )
         except SynthesisFailed as error:
             logger.error("Piper unavailable; falling back to pyttsx3", reason=str(error))
-    return _new_pyttsx3(cfg)
+            fallback_reason = _fallback_reason("piper", error, cfg.piper_model_dir)
+    return _new_pyttsx3(cfg, fallback_reason)
 
 
-def _new_pyttsx3(cfg: TtsConfig) -> SpeechSynthesisPort:
+def _fallback_reason(engine: str, error: Exception, *folders: Path) -> str:
+    """The note ``GET /available`` carries while pyttsx3 speaks instead of ``engine`` (ADR-008).
+
+    Built from the failure, but safe to show to any caller: one line, no folder path (a folder is named
+    by its last part, the home directory is ``~``), at most ``_MAX_CAUSE`` characters. The log keeps the
+    full text.
+    """
+    cause = " ".join(str(error).split())
+    for folder in folders:
+        name = folder.name or "."
+        cause = cause.replace(str(folder), name).replace(folder.as_posix(), name)
+    home = Path.home()
+    cause = cause.replace(str(home), "~").replace(home.as_posix(), "~")
+    return f"fallback: pyttsx3 instead of {engine} ({cause[:_MAX_CAUSE]})"
+
+
+def _new_pyttsx3(cfg: TtsConfig, fallback_reason: str | None = None) -> SpeechSynthesisPort:
     return Pyttsx3SpeechSynthesis(
         Pyttsx3Subprocess(
             speech_rate=cfg.speech_rate, voice_name_preference=cfg.voice_name_preference
-        )
+        ),
+        fallback_reason=fallback_reason,
     )
 
 

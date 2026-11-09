@@ -46,6 +46,7 @@ class FakePort(TtsSynthesisPort):
         self.set_texts: list[str] = []
         self.set_formats: list[tuple[int, int]] = []
         self.available = True
+        self.reason: str | None = None
 
     async def process_stream(self, request: ProcessStreamInboundDTO) -> AudioStreamOutboundDTO:
         self.stream_texts = [text async for text in request.text_stream]
@@ -86,6 +87,9 @@ class FakePort(TtsSynthesisPort):
     async def is_available(self) -> bool:
         return self.available
 
+    def fallback_reason(self) -> str | None:
+        return self.reason
+
 
 def _call(port: FakePort, method: str, path: str, **kwargs) -> httpx.Response:
     async def run() -> httpx.Response:
@@ -108,6 +112,23 @@ def test_availability_is_wrapped_in_an_object():
     assert _call(port, "GET", "/available").json()["data"] == {"is_available": True, "reason": None}
     port.available = False
     assert _call(port, "GET", "/available").json()["data"] == {"is_available": False, "reason": None}
+
+
+def test_a_fallback_voice_is_reported_in_the_reason_and_the_service_stays_available():
+    port = FakePort()
+    port.reason = "fallback: pyttsx3 instead of piper (Piper voice 'v' is not in models)"
+
+    response = _call(port, "GET", "/available")
+
+    assert response.status_code == 200
+    assert response.json()["data"] == {"is_available": True, "reason": port.reason}
+
+
+def test_health_does_not_report_the_engine():
+    port = FakePort()
+    port.reason = "fallback: pyttsx3 instead of piper (x)"
+
+    assert _call(port, "GET", "/health").json()["data"] == {"healthy": True}
 
 
 def test_process_stream_speaks_each_non_empty_line_and_streams_audio():

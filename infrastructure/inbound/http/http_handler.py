@@ -109,7 +109,7 @@ class TtsHandler:
         return success(
             "check_availability",
             "Availability checked successfully",
-            AvailabilityResponse(is_available=available),
+            AvailabilityResponse(is_available=available, reason=self._port.fallback_reason()),
         )
 
     async def handle_process_stream(

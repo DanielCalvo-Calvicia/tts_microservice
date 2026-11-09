@@ -1,0 +1,13 @@
+# Development requirements: tests and tooling. The deployment tool does not install this file.
+# Install it next to the runtime file of your OS:
+#   pip install -r requirements.windows.txt -r requirements-dev.txt     (Linux: requirements.linux.txt)
+
+# Testing
+pytest
+# fastapi.testclient (Starlette's TestClient) and some tests need httpx; the service itself does not import it
+httpx>=0.27.0
+
+# Tooling (configured in pyproject.toml; not required to run the tests)
+ruff
+black
+mypy

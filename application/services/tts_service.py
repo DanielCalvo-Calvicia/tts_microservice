@@ -87,6 +87,9 @@ class TtsService(TtsSynthesisPort):
     async def is_available(self) -> bool:
         return await self._synthesis.is_available()
 
+    def fallback_reason(self) -> str | None:
+        return self._synthesis.fallback_reason()
+
     async def _generate_into_queue(
         self, text_stream: AsyncIterator[str], audio_format: AudioFormat, queue: _AudioQueue
     ) -> None:
