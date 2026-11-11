@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | todo |
+| Status | done (2026-11-11: every subtask done, the documents checked in pass 2 of T-04) |
 | Kind | epic |
 | Depends on | — |
 | Blocks | T-03 |
@@ -25,7 +25,7 @@ The deployment audit ([../../deployment_audit/tts.md](../../deployment_audit/tts
 
 | Order | Task | State |
 |---|---|---|
-| 1 | [T-01.1 Baseline checks](T-01.1_baseline-checks/T-01.1_baseline-checks.md) | in progress (T-01.1.1 to T-01.1.5 done) |
+| 1 | [T-01.1 Baseline checks](T-01.1_baseline-checks/T-01.1_baseline-checks.md) | done (T-01.1.1 to T-01.1.5 on 2026-11-06, T-01.1.6 on 2026-11-09) |
 | 2 | [T-01.2 Engine visibility](T-01.2_engine-visibility/T-01.2_engine-visibility.md) | done (2026-11-06: decision A, ADR-008; T-01.2.2 to T-01.2.4 built; 157 tests) |
 | 3 | [T-01.3 Split the runtime and dev requirements](T-01.3_requirements-split.md) | done (2026-11-06) |
 | 4 | [T-01.4 Service documents true again](T-01.4_service-documents.md) | done (2026-11-06) |

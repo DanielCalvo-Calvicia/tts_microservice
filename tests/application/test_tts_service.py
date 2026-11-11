@@ -3,11 +3,11 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from application.dtos.process_batch_inbound import ProcessBatchInboundDTO
-from application.dtos.process_stream_inbound import ProcessStreamInboundDTO
-from application.ports.outbound.speech_synthesis_port import SpeechSynthesisPort
+from application.dtos.inbound.process_batch_inbound import ProcessBatchInboundDTO
+from application.dtos.inbound.process_stream_inbound import ProcessStreamInboundDTO
+from application.ports.outbound.tts_outbound_port import TtsOutboundPort
 from application.services.tts_service import TtsService
-from application.dtos.audio_segment_outbound import (
+from application.dtos.outbound.audio_segment_outbound import (
     AudioChunk,
     SegmentCompleted,
     SegmentFailed,
@@ -18,7 +18,7 @@ from domain.errors import EmptyText, InvalidAudioFormat
 from domain.value_objects.audio_format import AudioFormat
 
 
-class FakeSynthesis(SpeechSynthesisPort):
+class FakeSynthesis(TtsOutboundPort):
     """Speaks a text as its UTF-8 bytes, one chunk per text."""
 
     def __init__(

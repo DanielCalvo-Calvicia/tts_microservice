@@ -19,18 +19,18 @@ from contracts.stream.microservices.tts.inbound.partial import (
 from contracts.stream.schemas import TTS_INPUT_ACK, TTS_OUTBOUND
 from fastapi import FastAPI
 
-from application.dtos.audio_batch_outbound import AudioBatchOutboundDTO
-from application.dtos.audio_segment_outbound import (
+from application.dtos.outbound.audio_batch_outbound import AudioBatchOutboundDTO
+from application.dtos.outbound.audio_segment_outbound import (
     AudioChunk,
     AudioSegmentStreamOutboundDTO,
     SegmentCompleted,
     SegmentFailed,
     StreamFormat,
 )
-from application.dtos.audio_stream_outbound import AudioStreamOutboundDTO
-from application.dtos.process_batch_inbound import ProcessBatchInboundDTO
-from application.dtos.process_stream_inbound import ProcessStreamInboundDTO
-from application.ports.inbound.tts_synthesis_port import TtsSynthesisPort
+from application.dtos.outbound.audio_stream_outbound import AudioStreamOutboundDTO
+from application.dtos.inbound.process_batch_inbound import ProcessBatchInboundDTO
+from application.dtos.inbound.process_stream_inbound import ProcessStreamInboundDTO
+from application.ports.service.tts_service_port import TtsServicePort
 from domain.errors import EmptyText
 from infrastructure.inbound.http.http_handler import TtsHandler
 
@@ -40,7 +40,7 @@ async def _audio(*chunks: bytes) -> AsyncIterator[bytes]:
         yield chunk
 
 
-class FakePort(TtsSynthesisPort):
+class FakePort(TtsServicePort):
     def __init__(self) -> None:
         self.stream_texts: list[str] = []
         self.set_texts: list[str] = []
@@ -335,7 +335,7 @@ def test_get_with_a_format_that_differs_from_the_stream_is_a_422():
 def test_errors_map_to_natural_statuses():
     from application.errors import SynthesisFailed
     from domain.errors import InvalidAudioFormat
-    from infrastructure.inbound.http.http_error_mapper import map_error
+    from infrastructure.inbound.http.errors.http_error_mapper import map_error
 
     assert map_error(EmptyText("x")) == 400
     assert map_error(InvalidAudioFormat("x")) == 422

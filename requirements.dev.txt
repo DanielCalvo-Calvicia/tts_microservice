@@ -1,6 +1,6 @@
 # Development requirements: tests and tooling. The deployment tool does not install this file.
 # Install it next to the runtime file of your OS:
-#   pip install -r requirements.windows.txt -r requirements-dev.txt     (Linux: requirements.linux.txt)
+#   pip install -r requirements.windows.txt -r requirements.dev.txt     (Linux: requirements.linux.txt)
 
 # Testing
 pytest

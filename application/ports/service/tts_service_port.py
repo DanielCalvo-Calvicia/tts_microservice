@@ -1,14 +1,15 @@
 from abc import ABC, abstractmethod
 
-from application.dtos.audio_batch_outbound import AudioBatchOutboundDTO
-from application.dtos.audio_segment_outbound import AudioSegmentStreamOutboundDTO
-from application.dtos.audio_stream_outbound import AudioStreamOutboundDTO
-from application.dtos.process_batch_inbound import ProcessBatchInboundDTO
-from application.dtos.process_stream_inbound import ProcessStreamInboundDTO
+from application.dtos.inbound.process_batch_inbound import ProcessBatchInboundDTO
+from application.dtos.inbound.process_stream_inbound import ProcessStreamInboundDTO
+from application.dtos.outbound.audio_batch_outbound import AudioBatchOutboundDTO
+from application.dtos.outbound.audio_segment_outbound import AudioSegmentStreamOutboundDTO
+from application.dtos.outbound.audio_stream_outbound import AudioStreamOutboundDTO
 
 
-class TtsSynthesisPort(ABC):
-    """What the outside world may ask of the application."""
+class TtsServicePort(ABC):
+    """The service's own port: the text-to-speech use cases. ``TtsService`` implements it; the inbound adapters
+    call it (through the inbound port); nothing else in the application knows the concrete service."""
 
     @abstractmethod
     async def process_stream(self, request: ProcessStreamInboundDTO) -> AudioStreamOutboundDTO:

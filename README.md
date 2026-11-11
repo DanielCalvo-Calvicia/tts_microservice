@@ -7,7 +7,7 @@ is the fallback. Port **8002**, Python / FastAPI, no hardware.
 
 ## Status
 
-Working, needs a retest after the recent changes. Branch `feature_ai_claude_2`, `contracts` 0.16.0 bundled (uncommitted; the last commit has 0.15.0), 157 tests pass (2026-11-06). Not done: judging the `espeak` robot voice by ear (the Piper droid voice was judged and its defaults kept on 2026-11-06), Linux/Raspberry Pi runs and a running Docker container (an image builds on amd64 with Python 3.12), ruff/mypy clean-up. Full list: [known debt](docs/architecture/architecture.md#known-remaining-debt).
+Working, needs a retest after the recent changes. Branch `feature_ai_claude_2`, `contracts` 0.16.0 bundled, 170 tests pass (2026-11-11, after the restructure to the layout of `stt_microservice`; 157 on 2026-11-06). Not done: judging the `espeak` robot voice by ear (the Piper droid voice was judged and its defaults kept on 2026-11-06), Linux/Raspberry Pi runs and a running Docker container (an image builds on amd64 with Python 3.12), ruff/mypy clean-up. Full list: [known debt](docs/architecture/architecture.md#known-remaining-debt).
 
 | Area | State |
 |---|---|
@@ -21,7 +21,7 @@ Working, needs a retest after the recent changes. Branch `feature_ai_claude_2`, 
 ## Run
 
 ```bash
-pip install -r requirements.windows.txt     # runtime only (Linux: requirements.linux.txt); tests and tooling: requirements-dev.txt
+pip install -r requirements.windows.txt     # runtime only (Linux: requirements.linux.txt); tests and tooling: requirements.dev.txt
 python scripts/fetch_voice.py     # downloads the Piper voice (about 60 MB) into models/, once
 python main.py
 ```
@@ -68,7 +68,7 @@ Configuration is read from the environment (a `.env` file is loaded if present);
 Stream endpoints take `sample_rate` (22050) and `channels` (1) as query parameters; both must be positive.
 The audio is converted to that rate and channel count before it leaves the service.
 
-Details of every route, event and status: [docs/api/api.md](docs/api/api.md). JSON responses use the envelope `action / status / status_code / message / timestamp / data` (`contracts.api.common.envelope.ApiEnvelope`). Failures map to HTTP status codes in `infrastructure/inbound/http/http_error_mapper.py`: `400` blank text, `422` invalid audio format or one that differs from the stream's, `502` the speech engine failed, `500` anything else. There is no authentication.
+Details of every route, event and status: [docs/api/api.md](docs/api/api.md). JSON responses use the envelope `action / status / status_code / message / timestamp / data` (`contracts.api.common.envelope.ApiEnvelope`). Failures map to HTTP status codes in `infrastructure/inbound/http/errors/http_error_mapper.py`: `400` blank text, `422` invalid audio format or one that differs from the stream's, `502` the speech engine failed, `500` anything else. There is no authentication.
 
 A new `set` replaces the previous one: its audio queue is dropped and readers of the old stream see it end.
 
@@ -91,12 +91,12 @@ enforces this.
 ## Development
 
 ```powershell
-windows\Scripts\python.exe -m pip install -r requirements-dev.txt   # once, next to requirements.windows.txt: pytest, httpx, ruff, black, mypy
+windows\Scripts\python.exe -m pip install -r requirements.dev.txt   # once, next to requirements.windows.txt: pytest, httpx, ruff, black, mypy
 windows\Scripts\python.exe -m pytest        # unit + architecture tests (no speech engine needed)
 windows\Scripts\python.exe tests\simple.py  # end-to-end against a running service
 ```
 
-Result on 2026-11-06: `157 passed, 1 warning` in 15 s (136 on 2026-11-05; 5 new tests cover the fallback `reason` of `/available`, 16 cover the exit codes of `scripts/fetch_voice.py`). The warning is a Starlette `TestClient` deprecation notice. `ruff`, `mypy` and `black` are configured in `pyproject.toml` but not installed in this venv; the microphone venv's ruff reported 28 findings here on 2026-10-01 (6 auto-fixable), not fixed on purpose. `tests/simple.py` was not run in this pass. The Piper droid voice was listened to on 2026-11-06 (T-01.1.5) and its defaults kept; the `espeak` robot voice was not.
+Result on 2026-11-11: `170 passed, 1 warning` in 16 s (157 on 2026-11-06, before the 13 architecture tests of `test_dtos.py` and `test_ports.py`; 136 on 2026-11-05; 5 new tests cover the fallback `reason` of `/available`, 16 cover the exit codes of `scripts/fetch_voice.py`). The warning is a Starlette `TestClient` deprecation notice. `ruff`, `mypy` and `black` are configured in `pyproject.toml` but not installed in this venv; the microphone venv's ruff reported 28 findings here on 2026-10-01 (6 auto-fixable), not fixed on purpose. `tests/simple.py` was not run in this pass. The Piper droid voice was listened to on 2026-11-06 (T-01.1.5) and its defaults kept; the `espeak` robot voice was not.
 
 ## Documentation
 

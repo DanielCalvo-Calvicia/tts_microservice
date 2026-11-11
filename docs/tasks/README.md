@@ -78,8 +78,8 @@ Verified on 2026-11-05 against the code of both repositories, unless a row says 
 
 | ID | Task | Kind | Status |
 |---|---|---|---|
-| [T-01](T-01_deployment-readiness/T-01_deployment-readiness.md) | **Deployment readiness of the service** (epic) | epic | in-progress |
-| [T-01.1](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1_baseline-checks.md) | Baseline checks (no code change) | group | in-progress |
+| [T-01](T-01_deployment-readiness/T-01_deployment-readiness.md) | **Deployment readiness of the service** (epic) | epic | done |
+| [T-01.1](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1_baseline-checks.md) | Baseline checks (no code change) | group | done |
 | [T-01.1.1](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.1_clean-install-and-tests.md) | Clean install and tests | test | done |
 | [T-01.1.2](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.2_native-deploy.md) | Native deploy with the tool | manual | done |
 | [T-01.1.3](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.3_log-and-endpoint-checks.md) | Log and endpoint checks | manual | done |

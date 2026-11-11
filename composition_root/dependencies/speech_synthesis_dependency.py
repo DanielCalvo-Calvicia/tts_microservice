@@ -1,14 +1,10 @@
 from pathlib import Path
 
-from fastapi import FastAPI
-from shared_logging import TracingMiddleware, get_logger
+from shared_logging import get_logger
 
 from application.errors import SynthesisFailed
-from application.ports.inbound.tts_synthesis_port import TtsSynthesisPort
-from application.ports.outbound.speech_synthesis_port import SpeechSynthesisPort
-from application.services.tts_service import TtsService
+from application.ports.outbound.tts_outbound_port import TtsOutboundPort
 from infrastructure.config.tts_config import TtsConfig
-from infrastructure.inbound.http.http_handler import TtsHandler
 from infrastructure.outbound.espeak_speech.espeak_engine import EspeakEngine
 from infrastructure.outbound.espeak_speech.espeak_speech_synthesis import EspeakSpeechSynthesis
 from infrastructure.outbound.piper_speech.piper_engine import PiperEngine
@@ -23,7 +19,7 @@ logger = get_logger(__name__)
 _MAX_CAUSE = 200
 
 
-def new_speech_synthesis(cfg: TtsConfig) -> SpeechSynthesisPort:
+def new_speech_synthesis(cfg: TtsConfig) -> TtsOutboundPort:
     """The configured engine. A Piper voice or an espeak that cannot be loaded falls back to pyttsx3, loudly.
 
     Brain's startup preflight waits for this service and exits when it is not ready, so a machine whose voice
@@ -76,7 +72,7 @@ def _fallback_reason(engine: str, error: Exception, *folders: Path) -> str:
     return f"fallback: pyttsx3 instead of {engine} ({cause[:_MAX_CAUSE]})"
 
 
-def _new_pyttsx3(cfg: TtsConfig, fallback_reason: str | None = None) -> SpeechSynthesisPort:
+def _new_pyttsx3(cfg: TtsConfig, fallback_reason: str | None = None) -> TtsOutboundPort:
     return Pyttsx3SpeechSynthesis(
         Pyttsx3Subprocess(
             speech_rate=cfg.speech_rate, voice_name_preference=cfg.voice_name_preference
@@ -84,20 +80,3 @@ def _new_pyttsx3(cfg: TtsConfig, fallback_reason: str | None = None) -> SpeechSy
         fallback_reason=fallback_reason,
     )
 
-
-def new_tts_service(synthesis: SpeechSynthesisPort, name: str) -> TtsSynthesisPort:
-    return TtsService(synthesis=synthesis, name=name)
-
-
-def new_http_app(port: TtsSynthesisPort, name: str) -> FastAPI:
-    app = FastAPI(
-        title=name,
-        description=f"HTTP adapter exposing {name}",
-        version="1.0.0",
-        docs_url="/docs",
-        redoc_url="/redoc",
-        openapi_url="/openapi.json",
-    )
-    app.include_router(TtsHandler(port).router)
-    app.add_middleware(TracingMiddleware)
-    return app

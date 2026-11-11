@@ -1,5 +1,5 @@
 # Runtime requirements: what the service needs to run. The deployment tool installs only this file.
-# Tests and tooling are in requirements-dev.txt:  pip install -r requirements.linux.txt -r requirements-dev.txt
+# Tests and tooling are in requirements.dev.txt:  pip install -r requirements.linux.txt -r requirements.dev.txt
 fastapi>=0.110.0
 uvicorn>=0.29.0
 python-dotenv>=1.0.1

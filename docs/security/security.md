@@ -21,5 +21,5 @@ Only what can be verified in the repository (2026-11-05). Labels: **Implemented*
 ## Supply chain
 
 - The Piper voice is downloaded by `scripts/fetch_voice.py` into a temporary folder, loaded once to prove it is intact, and only then moved into place; an interrupted download never leaves a half voice. The download is Piper's own (`piper.download_voices`), over the network, at deploy time only. **Recommended but not implemented:** a checksum of the voice file.
-- `contracts` comes from the wheel in `vendor/` (0.16.0 in the working tree, 0.15.0 in the last commit), built from the workspace; `shared-logging` is the local checkout (`-e ../shared-logging`).
-- **Recommended but not implemented:** pinned versions and a lock file (the requirements use lower bounds); `pytest`, `ruff`, `black`, `mypy` and `httpx` are no longer in the runtime requirements: they moved to `requirements-dev.txt` on 2026-11-06, so a deployed install carries fewer packages (D-5, split done; versions still unpinned).
+- `contracts` comes from the wheel in `vendor/` (0.16.0), built from the workspace; `shared-logging` is the local checkout (`-e ../shared-logging`).
+- **Recommended but not implemented:** pinned versions and a lock file (the requirements use lower bounds); `pytest`, `ruff`, `black`, `mypy` and `httpx` are no longer in the runtime requirements: they moved to `requirements.dev.txt` on 2026-11-06, so a deployed install carries fewer packages (D-5, split done; versions still unpinned).

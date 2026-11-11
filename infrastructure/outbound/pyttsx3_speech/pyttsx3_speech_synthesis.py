@@ -1,6 +1,6 @@
 """Outbound adapter: speaks text by having a synthesizer write a WAV file, then reading it back.
 
-Implements ``SpeechSynthesisPort``. The engine (``Pyttsx3Subprocess``) is a collaborator so the
+Implements ``TtsOutboundPort``. The engine (``Pyttsx3Subprocess``) is a collaborator so the
 file/PCM handling can be tested without a speech engine.
 """
 
@@ -14,7 +14,7 @@ from typing import Protocol
 from shared_logging import get_logger
 
 from application.errors import SynthesisFailed
-from application.ports.outbound.speech_synthesis_port import SpeechSynthesisPort
+from application.ports.outbound.tts_outbound_port import TtsOutboundPort
 from domain.operations.pcm import convert_pcm16
 from domain.value_objects.audio_format import AudioFormat
 
@@ -30,7 +30,7 @@ class WavSynthesizer(Protocol):
     async def is_working(self) -> bool: ...
 
 
-class Pyttsx3SpeechSynthesis(SpeechSynthesisPort):
+class Pyttsx3SpeechSynthesis(TtsOutboundPort):
     def __init__(self, synthesizer: WavSynthesizer, fallback_reason: str | None = None) -> None:
         self._synthesizer = synthesizer
         self._fallback_reason = fallback_reason

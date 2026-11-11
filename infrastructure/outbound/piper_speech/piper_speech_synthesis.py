@@ -1,6 +1,6 @@
 """Outbound adapter: speaks text with a Piper neural voice and gives it a droid colour.
 
-Implements ``SpeechSynthesisPort``. The engine (``PiperEngine``) is a collaborator so the pitch, effect and
+Implements ``TtsOutboundPort``. The engine (``PiperEngine``) is a collaborator so the pitch, effect and
 format handling can be tested without a voice model.
 """
 
@@ -12,7 +12,7 @@ import numpy as np
 from shared_logging import get_logger
 
 from application.errors import SynthesisFailed
-from application.ports.outbound.speech_synthesis_port import SpeechSynthesisPort
+from application.ports.outbound.tts_outbound_port import TtsOutboundPort
 from domain.operations.pcm import convert_pcm16
 from domain.value_objects.audio_format import AudioFormat
 from infrastructure.outbound.piper_speech import droid_voice
@@ -30,7 +30,7 @@ class FloatSynthesizer(Protocol):
     def synthesize(self, text: str, speed: float) -> np.ndarray: ...
 
 
-class PiperSpeechSynthesis(SpeechSynthesisPort):
+class PiperSpeechSynthesis(TtsOutboundPort):
     def __init__(
         self,
         engine: FloatSynthesizer,

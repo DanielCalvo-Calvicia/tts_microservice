@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| Status | in-progress (T-03.1, T-03.2 and T-03.4 done; T-03.3 needs a Raspberry Pi; T-03.5 waits for it) |
+| Status | in-progress (T-03.1, T-03.2, T-03.4 and T-03.5 done; T-03.3 is postponed: it needs a Raspberry Pi) |
 | Kind | epic |
 | Depends on | T-01, T-02 |
 | Blocks | — |

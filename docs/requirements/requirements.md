@@ -1,6 +1,6 @@
 # Requirements
 
-Status as of 2026-11-06. **Done** means implemented and covered by the tests (157 pass); **Partly done** means some of it exists; **Not done** means absent on purpose or not started. Every row names the ADR or document that records it. The requirements were derived from the code and the project notes; the maintainer has not signed them off.
+Status as of 2026-11-06. **Done** means implemented and covered by the tests (170 pass on 2026-11-11, after the restructure of the layers; the statuses below date from 2026-11-06 and did not change); **Partly done** means some of it exists; **Not done** means absent on purpose or not started. Every row names the ADR or document that records it. The requirements were derived from the code and the project notes; the maintainer has not signed them off.
 
 ## Functional
 
@@ -37,7 +37,7 @@ Status as of 2026-11-06. **Done** means implemented and covered by the tests (15
 | NFR-9 | No authentication; the network limits who can call it | Done as a decision; not a solution | [Security](../security/security.md) |
 | NFR-10 | A sentence synthesizes faster than it takes to say it on a Raspberry Pi | Not verified | D-4 |
 | NFR-11 | The audio of a text is available to Brain within the preflight and call timeouts | Not measured | |
-| NFR-12 | A deployed install contains only what the service runs on: the runtime requirements files, with tests and tooling in `requirements-dev.txt` | Done (2026-11-06, T-01.3): a runtime-only venv starts the service; runtime plus dev passes the suite. Versions are not pinned (D-5) | [Deployment](../deployment/deployment.md) |
+| NFR-12 | A deployed install contains only what the service runs on: the runtime requirements files, with tests and tooling in `requirements.dev.txt` | Done (2026-11-06, T-01.3): a runtime-only venv starts the service; runtime plus dev passes the suite. Versions are not pinned (D-5) | [Deployment](../deployment/deployment.md) |
 
 ## Known gaps
 

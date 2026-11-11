@@ -11,7 +11,7 @@ from fastapi import status
 from fastapi.responses import Response
 from starlette.types import Receive, Scope, Send
 
-NDJSON_MEDIA_TYPE = "application/x-ndjson"
+from infrastructure.inbound.http.helpers.media_types import NDJSON
 
 
 class TrackedTexts:
@@ -55,7 +55,7 @@ class InputStreamResponse(Response):
             content=b"",
             status_code=status.HTTP_202_ACCEPTED,
             headers=headers,
-            media_type=NDJSON_MEDIA_TYPE,
+            media_type=NDJSON,
         )
         self._tracked = tracked
         self.raw_headers = [(n, v) for n, v in self.raw_headers if n.lower() != b"content-length"]

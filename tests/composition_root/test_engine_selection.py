@@ -5,7 +5,7 @@ import asyncio
 import pytest
 from shared_logging.testing import capture
 
-from composition_root.dependencies import tts_dependencies as deps
+from composition_root.dependencies import speech_synthesis_dependency as deps
 from domain.value_objects.audio_format import AudioFormat
 from infrastructure.config.tts_config import TtsConfig
 from infrastructure.outbound.espeak_speech.espeak_speech_synthesis import EspeakSpeechSynthesis
@@ -15,7 +15,7 @@ from infrastructure.outbound.pyttsx3_speech.pyttsx3_speech_synthesis import Pytt
 ALAN = "en_GB-alan-medium"
 PIPER_FALLBACK = "Piper unavailable; falling back to pyttsx3"
 ESPEAK_FALLBACK = "espeak unavailable; falling back to pyttsx3"
-SELECTION_LOGGER = "composition_root.dependencies.tts_dependencies"
+SELECTION_LOGGER = "composition_root.dependencies.speech_synthesis_dependency"
 
 
 def _fallback_records(logs):

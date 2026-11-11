@@ -15,21 +15,21 @@ The order in which the tasks must be done, with the state of each one and the da
 | Blocked | Waits for another task or for a decision |
 | Recurring | Repeated after every big task |
 
-Written on 2026-11-06 from the deployment audit. T-01.1.1 to T-01.1.5 are done (2026-11-06). T-01.1.6 is in progress (step 1 done: `84 passed, 18 skipped`; steps 2 and 3 need the maintainer). The decision T-01.2.1 was answered the same day (option A, ADR-008) The whole T-01.2 group is done (T-01.2.2 to T-01.2.4; 157 tests). T-01.3 and T-01.4 are done. The only open task of epic T-01 is T-01.1.6 (steps 2 and 3 need the maintainer). Epic T-02 is done (T-02.1 to T-02.4, in the `deployment` repository). T-03.1 is done (the first Docker build). T-03.2 is done (it found D-11, fixed in the catalogue's `apt` list) and so is T-03.4. **Todo (next)** is T-03.3 (arm64), which needs a Raspberry Pi 4 or newer and the maintainer; T-03.5 (record what was verified) waits for it, and T-01.1.6 steps 2 and 3 are still open. The deployment suite has one failure that is not from these tasks: `test_the_real_workspace_is_compatible`, because `camera_microservice` bundles contracts 0.15.0. T-01.1.6 stays in progress (steps 2 and 3 need the maintainer).
+Written on 2026-11-06 from the deployment audit, last brought in line on 2026-11-11 (pass 2 of [T-04](T-04_documentation-sync.md)). Epic T-01 is done: T-01.1.1 to T-01.1.5 on 2026-11-06 and T-01.1.6 (the pipeline round trip through Brain) on 2026-11-09; the whole T-01.2 group (decision A, ADR-008; 157 tests then), T-01.3 and T-01.4 on 2026-11-06. Epic T-02 is done (T-02.1 to T-02.4, in the `deployment` repository). In T-03, T-03.1, T-03.2 (it found D-11, fixed in the catalogue `apt` list), T-03.4 and T-03.5 are done; **T-03.3 (arm64) is postponed** (2026-11-09: it needs a Raspberry Pi 4 or newer, and no Pi test is planned until the services work fully on Windows). Nothing is todo. The restructure of the layers on 2026-11-11 changed file names that old task notes cite; those notes are a record and were not rewritten.
 
 ## A. Deployment readiness of the service (T-01)
 
 | # | Task | Name | Kind | State | Detail | Depends on | Last updated |
 |---|---|---|---|---|---|---|---|
-| 1 | [T-01](T-01_deployment-readiness/T-01_deployment-readiness.md) | Deployment readiness of the service | epic | In progress | T-01.1.1 to T-01.1.5 done | — | 2026-11-06 |
-| 2 | [T-01.1](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1_baseline-checks.md) | Baseline checks | group | In progress | T-01.1.1 to T-01.1.5 done | — | 2026-11-06 |
+| 1 | [T-01](T-01_deployment-readiness/T-01_deployment-readiness.md) | Deployment readiness of the service | epic | Done | all subtasks done (T-01.1.6 on 2026-11-09) | — | 2026-11-11 |
+| 2 | [T-01.1](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1_baseline-checks.md) | Baseline checks | group | Done | all six leaves done (T-01.1.6 on 2026-11-09) | — | 2026-11-11 |
 | 3 | [T-01.1.1](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.1_clean-install-and-tests.md) | Clean install and tests | test | Done | 136 passed in a clean clone; voice fetched twice (exit 0); findings in its Notes | — | 2026-11-06 |
 | 4 | [T-01.1.2](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.2_native-deploy.md) | Native deploy with the tool | manual | Done | deployed into the scratchpad with a throwaway `--config`; voice fetched, healthy on 8002; service left running for T-01.1.3 | T-01.1.1 | 2026-11-06 |
 | 5 | [T-01.1.3](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.3_log-and-endpoint-checks.md) | Log and endpoint checks | manual | Done | Piper confirmed in the log; all five endpoint checks pass | T-01.1.2 | 2026-11-06 |
 | 6 | [T-01.1.4](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.4_failure-drill.md) | Failure drill | manual | Done | D-6 reproduced: warning, exit 0, "healthy and available", `is_available: true` on pyttsx3; repaired by a second deploy | T-01.1.2 | 2026-11-06 |
 | 7 | [T-01.1.5](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.5_listening-check.md) | Listening check | manual | Done | maintainer kept the default (variant 3); D-2 resolved for the Piper droid voice, open for the espeak robot voice | T-01.1.1 | 2026-11-06 |
 | 8 | [T-01.1.6](T-01_deployment-readiness/T-01.1_baseline-checks/T-01.1.6_pipeline-round-trip.md) | Pipeline round trip through Brain | manual | Done | step 1 84 passed, 18 skipped (2026-11-06); steps 2 and 3 run 2026-11-09 with the real speaker: tts ready in Brain's preflight, three sentences spoken; found the speaker's 3 s truncation (R-6) | T-01.1.2 | 2026-11-09 |
-| 9 | [T-01.2](T-01_deployment-readiness/T-01.2_engine-visibility/T-01.2_engine-visibility.md) | Engine visibility | group | Done | all four leaves done (T-01.1.6 of its dependency T-01.1 is still open) | T-01.1 | 2026-11-06 |
+| 9 | [T-01.2](T-01_deployment-readiness/T-01.2_engine-visibility/T-01.2_engine-visibility.md) | Engine visibility | group | Done | all four leaves done | T-01.1 | 2026-11-06 |
 | 10 | [T-01.2.1](T-01_deployment-readiness/T-01.2_engine-visibility/T-01.2.1_engine-report-decision.md) | Decision: where the engine report goes | decision | Done | option A chosen: `reason` of `/available`, `/health` unchanged, tool warns (ADR-008) | T-01.1.3 | 2026-11-06 |
 | 11 | [T-01.2.2](T-01_deployment-readiness/T-01.2_engine-visibility/T-01.2.2_engine-report.md) | Report the active engine | code | Done | `/available` carries a path-free `reason` on a fallback; 141 tests pass | T-01.2.1 | 2026-11-06 |
 | 12 | [T-01.2.3](T-01_deployment-readiness/T-01.2_engine-visibility/T-01.2.3_fetch-voice-exit-codes.md) | Pin the exit codes of `fetch_voice.py` with tests | test | Done | 16 tests, all 11 mutations of the script caught; 157 tests pass | T-01.1.4 | 2026-11-06 |
@@ -51,7 +51,7 @@ Written on 2026-11-06 from the deployment audit. T-01.1.1 to T-01.1.5 are done (
 
 | # | Task | Name | Kind | State | Detail | Depends on | Last updated |
 |---|---|---|---|---|---|---|---|
-| 21 | [T-03](T-03_docker-and-arm64-acceptance/T-03_docker-and-arm64-acceptance.md) | Docker and arm64 acceptance | epic | In progress | T-03.1 done; Docker Desktop must stay started, commands use `--context desktop-linux` | T-01, T-02 | 2026-11-06 |
+| 21 | [T-03](T-03_docker-and-arm64-acceptance/T-03_docker-and-arm64-acceptance.md) | Docker and arm64 acceptance | epic | In progress | T-03.1, T-03.2, T-03.4 and T-03.5 done; T-03.3 (arm64) postponed, it needs a Raspberry Pi; Docker Desktop must stay started, commands use `--context desktop-linux` | T-01, T-02 | 2026-11-11 |
 | 22 | [T-03.1](T-03_docker-and-arm64-acceptance/T-03.1_amd64-build.md) | Build the image on amd64 | manual | Done | image builds in 68 s on Python 3.12.16, voice fetched into `/app/models`, 792 MB; built from the pushed commit, so it lacks the uncommitted work | T-02.1, T-02.3 | 2026-11-06 |
 | 23 | [T-03.2](T-03_docker-and-arm64-acceptance/T-03.2_run-and-call.md) | Run the container and call it | manual | Done | the working-tree image runs, answers and speaks; step 5 found D-11 (pyttsx3 fallback broken by the old espeak packages), fixed by `apt = ["espeak-ng", "libespeak-ng1"]`; the tool then prints `healthy and available, warning: ...` for a missing voice | T-03.1, T-02.2 | 2026-11-06 |
 | 24 | [T-03.3](T-03_docker-and-arm64-acceptance/T-03.3_arm64.md) | Build and run on arm64 | manual | Postponed | needs a Raspberry Pi 4 or newer | T-03.2 | 2026-11-09 |
@@ -62,8 +62,8 @@ Written on 2026-11-06 from the deployment audit. T-01.1.1 to T-01.1.5 are done (
 
 | # | Task | Name | Kind | State | Detail | Depends on | Last updated |
 |---|---|---|---|---|---|---|---|
-| 27 | [T-04](T-04_documentation-sync.md) | Documentation sync | docs | Recurring | after T-01, T-02 and T-03 | — | 2026-11-06 |
+| 27 | [T-04](T-04_documentation-sync.md) | Documentation sync | docs | Recurring | after T-01, T-02 and T-03 | — | 2026-11-11 |
 
 ## What can run in parallel
 
-All of T-01 (except T-01.1.6) and T-02 are done. T-01.2.1, the only decision, was answered (option A). What is left is proof by running: T-03.1 (build) then T-03.2 (run and call) and T-03.4 (build without network) in either order, T-03.3 (arm64, needs a Raspberry Pi) after T-03.2, and T-03.5 (record the results) last; T-01.1.6 steps 2 and 3 are independent.
+All of T-01 and T-02 are done. T-01.2.1, the only decision, was answered (option A). In T-03 only T-03.3 (arm64, needs a Raspberry Pi) is left, and it is postponed.

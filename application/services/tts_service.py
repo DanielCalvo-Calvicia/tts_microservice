@@ -3,19 +3,19 @@ from collections.abc import AsyncIterator
 
 from shared_logging import get_logger
 
-from application.dtos.audio_batch_outbound import AudioBatchOutboundDTO
-from application.dtos.audio_segment_outbound import (
+from application.dtos.outbound.audio_batch_outbound import AudioBatchOutboundDTO
+from application.dtos.outbound.audio_segment_outbound import (
     AudioChunk,
     AudioSegmentEvent,
     AudioSegmentStreamOutboundDTO,
     SegmentFailed,
     StreamFormat,
 )
-from application.dtos.audio_stream_outbound import AudioStreamOutboundDTO
-from application.dtos.process_batch_inbound import ProcessBatchInboundDTO
-from application.dtos.process_stream_inbound import ProcessStreamInboundDTO
-from application.ports.inbound.tts_synthesis_port import TtsSynthesisPort
-from application.ports.outbound.speech_synthesis_port import SpeechSynthesisPort
+from application.dtos.outbound.audio_stream_outbound import AudioStreamOutboundDTO
+from application.dtos.inbound.process_batch_inbound import ProcessBatchInboundDTO
+from application.dtos.inbound.process_stream_inbound import ProcessStreamInboundDTO
+from application.ports.service.tts_service_port import TtsServicePort
+from application.ports.outbound.tts_outbound_port import TtsOutboundPort
 from domain.operations.text import is_speakable, require_speakable
 from domain.value_objects.audio_format import AudioFormat
 
@@ -24,10 +24,10 @@ logger = get_logger(__name__)
 _AudioQueue = asyncio.Queue[AudioSegmentEvent | None]
 
 
-class TtsService(TtsSynthesisPort):
+class TtsService(TtsServicePort):
     """Orchestrates the text-to-speech use cases. Business rules live in the domain."""
 
-    def __init__(self, synthesis: SpeechSynthesisPort, name: str = "tts_service") -> None:
+    def __init__(self, synthesis: TtsOutboundPort, name: str = "tts_service") -> None:
         self.name = name
         self._synthesis = synthesis
         # get_stream may be called before set_stream: it then waits on this empty queue.

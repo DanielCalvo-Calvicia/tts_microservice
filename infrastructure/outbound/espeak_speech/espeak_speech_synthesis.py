@@ -1,6 +1,6 @@
 """Outbound adapter: speaks text with the espeak formant synthesizer and gives it a machine colour.
 
-Implements ``SpeechSynthesisPort``. The engine (``EspeakEngine``) is a collaborator so the effect and format
+Implements ``TtsOutboundPort``. The engine (``EspeakEngine``) is a collaborator so the effect and format
 handling can be tested without espeak installed.
 """
 
@@ -12,7 +12,7 @@ import numpy as np
 from shared_logging import get_logger
 
 from application.errors import SynthesisFailed
-from application.ports.outbound.speech_synthesis_port import SpeechSynthesisPort
+from application.ports.outbound.tts_outbound_port import TtsOutboundPort
 from domain.operations.pcm import convert_pcm16
 from domain.value_objects.audio_format import AudioFormat
 from infrastructure.outbound.espeak_speech import robot_voice
@@ -31,7 +31,7 @@ class FloatSynthesizer(Protocol):
     def synthesize(self, text: str, speed: float) -> np.ndarray: ...
 
 
-class EspeakSpeechSynthesis(SpeechSynthesisPort):
+class EspeakSpeechSynthesis(TtsOutboundPort):
     def __init__(self, engine: FloatSynthesizer, *, speed: float, effect_strength: float) -> None:
         self._engine = engine
         self._speed = speed

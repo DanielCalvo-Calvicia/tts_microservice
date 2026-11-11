@@ -1,232 +1,108 @@
-"""HTTP inbound adapter: decode -> call the inbound port -> encode. No business rules."""
+"""HTTP inbound adapter: declares the endpoints and wires each one to its route. No request logic of its own."""
 
-import base64
-import time
-from collections.abc import AsyncIterator
-
-from contracts.api.microservices.common.availability import AvailabilityResponse
-from contracts.api.microservices.common.health_check import HealthCheckResponse
-from contracts.api.microservices.tts.process_batch import ProcessBatchResponse
 from fastapi import APIRouter, Request, status
-from fastapi.responses import JSONResponse, Response, StreamingResponse
-from shared_logging import get_logger
+from fastapi.responses import JSONResponse, Response
 
-from application.dtos.process_batch_inbound import ProcessBatchInboundDTO
-from application.errors import AudioFormatMismatch
-from application.dtos.process_stream_inbound import ProcessStreamInboundDTO
-from application.ports.inbound.tts_synthesis_port import TtsSynthesisPort
-from infrastructure.inbound.http.audio_events import NDJSON_MEDIA_TYPE, audio_events_as_ndjson
-from infrastructure.inbound.http.http_envelope import failure, success
-from infrastructure.inbound.http.input_stream_response import InputStreamResponse, TrackedTexts
-from infrastructure.inbound.http.ndjson_text_input import texts_from_ndjson
+from application.dtos.inbound.process_batch_inbound import ProcessBatchInboundDTO
+from application.dtos.inbound.process_stream_inbound import ProcessStreamInboundDTO
+from application.dtos.outbound.audio_batch_outbound import AudioBatchOutboundDTO
+from application.dtos.outbound.audio_segment_outbound import AudioSegmentStreamOutboundDTO
+from application.dtos.outbound.audio_stream_outbound import AudioStreamOutboundDTO
+from application.ports.inbound.tts_inbound_port import TtsInboundPort
+from application.ports.service.tts_service_port import TtsServicePort
+from infrastructure.inbound.http.routes.available import handle_available
+from infrastructure.inbound.http.routes.get_stream import handle_get_stream
+from infrastructure.inbound.http.routes.health import handle_health
+from infrastructure.inbound.http.routes.process_batch import handle_process_batch
+from infrastructure.inbound.http.routes.process_stream import handle_process_stream
+from infrastructure.inbound.http.routes.set_stream import handle_set_stream
 
-logger = get_logger(__name__)
-
-_DEFAULTS = ProcessBatchInboundDTO(text="")
-_AUDIO_MEDIA_TYPE = "audio/wav"
-_GET_HEARTBEAT_SECONDS = 15.0
-
-
-def _stream_headers(action: str, message: str) -> dict[str, str]:
-    return {
-        "Cache-Control": "no-cache",
-        "Connection": "keep-alive",
-        "X-Action": action,
-        "X-Status": "success",
-        "X-Message": message,
-        "X-Timestamp": str(time.time()),
-    }
+_DEFAULTS = ProcessBatchInboundDTO(text="")  # the default audio format of every endpoint
 
 
-def _is_ndjson_request(request: Request) -> bool:
-    return NDJSON_MEDIA_TYPE in request.headers.get("content-type", "").lower()
+class TtsHandler(TtsInboundPort):
+    """The HTTP inbound adapter. It declares which endpoints exist and wires each to its function in ``routes/``;
+    the request decoding, the answers and the error mapping live in ``helpers/``, ``response/`` and ``errors/``.
+    Its operations are those of ``TtsInboundPort`` (DTOs, no HTTP types) and the routes call them."""
 
-
-async def _request_body_chunks(request: Request) -> AsyncIterator[bytes]:
-    async for chunk in request.stream():
-        yield chunk
-
-
-async def _read_text_lines(request: Request) -> list[str]:
-    """The non-empty lines of the request body, one text to speak each.
-
-    The body is read up front: ``set_stream`` keeps speaking after the response has been sent,
-    when the request can no longer be read.
-    """
-    body = (await request.body()).decode("utf-8")
-    lines = [line.strip() for line in body.split("\n") if line.strip()]
-    logger.info("Parsed request body", non_empty_lines=len(lines))
-    return lines
-
-
-async def _as_stream(lines: list[str]) -> AsyncIterator[str]:
-    for line in lines:
-        logger.info("Yielding text line", length=len(line))
-        yield line
-
-
-async def _counted(audio_stream: AsyncIterator[bytes], label: str) -> AsyncIterator[bytes]:
-    chunk_count = 0
-    total_bytes = 0
-    async for chunk in audio_stream:
-        chunk_count += 1
-        total_bytes += len(chunk)
-        yield chunk
-    logger.info(
-        "Audio stream completed",
-        label=label,
-        chunk_count=chunk_count,
-        total_bytes=total_bytes,
-    )
-
-
-class TtsHandler:
-    def __init__(self, port: TtsSynthesisPort) -> None:
-        self._port = port
+    def __init__(self, service: TtsServicePort) -> None:
+        self._service = service
         self.router = APIRouter()
+        self._register_routes()
+
+    def _register_routes(self) -> None:
+        inbound: TtsInboundPort = self
         add = self.router.add_api_route
-        add("/health", self.handle_health, methods=["GET"], tags=["Health"])
-        add("/available", self.handle_available, methods=["GET"])
-        add("/process/stream", self.handle_process_stream, methods=["POST"], response_model=None)
+
+        async def health() -> JSONResponse:
+            return await handle_health(inbound)
+
+        async def available() -> JSONResponse:
+            return await handle_available(inbound)
+
+        async def process_stream(
+            request: Request,
+            sample_rate: int = _DEFAULTS.sample_rate,
+            channels: int = _DEFAULTS.channels,
+        ) -> Response:
+            return await handle_process_stream(request, sample_rate, channels, inbound)
+
+        async def set_stream(
+            request: Request,
+            sample_rate: int = _DEFAULTS.sample_rate,
+            channels: int = _DEFAULTS.channels,
+        ) -> Response:
+            return await handle_set_stream(request, sample_rate, channels, inbound)
+
+        async def get_stream(
+            sample_rate: int | None = None,
+            channels: int | None = None,
+            keep_open_after_completed: bool = True,  # accepted for compatibility: the stream always stays open
+        ) -> Response:
+            return await handle_get_stream(sample_rate, channels, inbound)
+
+        async def process_batch(
+            text: str = "",
+            sample_rate: int = _DEFAULTS.sample_rate,
+            channels: int = _DEFAULTS.channels,
+        ) -> JSONResponse:
+            return await handle_process_batch(text, sample_rate, channels, inbound)
+
+        add("/health", health, methods=["GET"], tags=["Health"])
+        add("/available", available, methods=["GET"])
+        add("/process/stream", process_stream, methods=["POST"], response_model=None)
         add(
             "/process/stream/set",
-            self.handle_set_stream,
+            set_stream,
             methods=["POST"],
             status_code=status.HTTP_202_ACCEPTED,
             response_model=None,
         )
-        add("/process/stream/get", self.handle_get_stream, methods=["GET"], response_model=None)
-        add("/process/batch", self.handle_process_batch, methods=["POST"])
+        add("/process/stream/get", get_stream, methods=["GET"], response_model=None)
+        add("/process/batch", process_batch, methods=["POST"])
 
-    async def handle_health(self) -> JSONResponse:
-        return success("health_check", "Service is healthy", HealthCheckResponse(healthy=True))
+    # --- TtsInboundPort: the operations every inbound adapter offers --------------------------------
 
-    async def handle_available(self) -> JSONResponse:
-        try:
-            available = await self._port.is_available()
-        except Exception as error:
-            return failure("check_availability", "Failed to check availability", error)
-        return success(
-            "check_availability",
-            "Availability checked successfully",
-            AvailabilityResponse(is_available=available, reason=self._port.fallback_reason()),
-        )
+    def health(self) -> bool:
+        return True
 
-    async def handle_process_stream(
-        self,
-        request: Request,
-        sample_rate: int = _DEFAULTS.sample_rate,
-        channels: int = _DEFAULTS.channels,
-    ) -> Response:
-        try:
-            lines = await _read_text_lines(request)
-            result = await self._port.process_stream(
-                ProcessStreamInboundDTO(
-                    text_stream=_as_stream(lines), sample_rate=sample_rate, channels=channels
-                )
-            )
-        except Exception as error:
-            return failure("process_stream", "Failed to process stream", error)
-        return StreamingResponse(
-            _counted(result.audio_stream, "/process/stream"),
-            media_type=_AUDIO_MEDIA_TYPE,
-            status_code=status.HTTP_200_OK,
-            headers=_stream_headers("process_stream", "Stream processed successfully"),
-        )
+    async def is_available(self) -> bool:
+        return await self._service.is_available()
 
-    async def handle_set_stream(
-        self,
-        request: Request,
-        sample_rate: int = _DEFAULTS.sample_rate,
-        channels: int = _DEFAULTS.channels,
-    ) -> Response:
-        """Accept the text to speak.
+    def fallback_reason(self) -> str | None:
+        return self._service.fallback_reason()
 
-        ``Content-Type: application/x-ndjson`` is the Brain protocol: a live stream of TTS inbound
-        contract events, consumed as it arrives while the response stays open. Any other body is a
-        plain text (one utterance per line), read up front, for simple clients.
-        """
-        if _is_ndjson_request(request):
-            return await self._set_event_stream(request, sample_rate, channels)
-        try:
-            lines = await _read_text_lines(request)
-            await self._port.set_stream(
-                ProcessStreamInboundDTO(
-                    text_stream=_as_stream(lines), sample_rate=sample_rate, channels=channels
-                )
-            )
-        except Exception as error:
-            return failure("set_stream", "Failed to set stream", error)
-        return success(
-            "set_stream",
-            "Stream accepted. Background synthesis started.",
-            code=status.HTTP_202_ACCEPTED,
-            state="accepted",
-        )
+    def current_format(self) -> tuple[int, int] | None:
+        return self._service.current_format()
 
-    async def _set_event_stream(self, request: Request, sample_rate: int, channels: int) -> Response:
-        tracked = TrackedTexts(texts_from_ndjson(_request_body_chunks(request)))
-        try:
-            await self._port.set_stream(
-                ProcessStreamInboundDTO(
-                    text_stream=tracked.stream(), sample_rate=sample_rate, channels=channels
-                )
-            )
-        except Exception as error:
-            return failure("set_stream", "Failed to set stream", error)
-        return InputStreamResponse(
-            tracked, headers=_stream_headers("set_stream", "Input stream connection established")
-        )
+    async def process_stream(self, request: ProcessStreamInboundDTO) -> AudioStreamOutboundDTO:
+        return await self._service.process_stream(request)
 
-    async def handle_get_stream(
-        self,
-        sample_rate: int | None = None,
-        channels: int | None = None,
-        keep_open_after_completed: bool = True,  # accepted for compatibility: the stream always stays open
-    ) -> Response:
-        """The synthesized audio as TTS outbound contract events (``application/x-ndjson``).
+    async def set_stream(self, request: ProcessStreamInboundDTO) -> None:
+        await self._service.set_stream(request)
 
-        The audio format was fixed by ``set``; ``sample_rate``/``channels`` repeated here must match.
-        """
-        try:
-            active = self._port.current_format()
-            if active is not None:
-                for name, given, actual in (
-                    ("sample_rate", sample_rate, active[0]),
-                    ("channels", channels, active[1]),
-                ):
-                    if given is not None and given != actual:
-                        raise AudioFormatMismatch(f"{name}={given} differs from the stream's {name}={actual}")
-            result = await self._port.get_segment_stream()
-        except Exception as error:
-            return failure("get_stream", "Failed to get stream", error)
-        return StreamingResponse(
-            audio_events_as_ndjson(
-                result.events, heartbeat_interval_seconds=_GET_HEARTBEAT_SECONDS
-            ),
-            media_type=NDJSON_MEDIA_TYPE,
-            status_code=status.HTTP_200_OK,
-            headers=_stream_headers("get_stream", "Decoupled stream retrieved successfully"),
-        )
+    async def get_segment_stream(self) -> AudioSegmentStreamOutboundDTO:
+        return await self._service.get_segment_stream()
 
-    async def handle_process_batch(
-        self,
-        text: str = "",
-        sample_rate: int = _DEFAULTS.sample_rate,
-        channels: int = _DEFAULTS.channels,
-    ) -> JSONResponse:
-        try:
-            result = await self._port.process_batch(
-                ProcessBatchInboundDTO(text=text, sample_rate=sample_rate, channels=channels)
-            )
-        except Exception as error:
-            return failure("process_batch", "Failed to process batch", error)
-        return success(
-            "process_batch",
-            "Text synthesized successfully",
-            ProcessBatchResponse(
-                audio_data_base64=base64.b64encode(result.audio_data).decode("utf-8"),
-                sample_rate=sample_rate,
-                channels=channels,
-            ),
-        )
+    async def process_batch(self, request: ProcessBatchInboundDTO) -> AudioBatchOutboundDTO:
+        return await self._service.process_batch(request)

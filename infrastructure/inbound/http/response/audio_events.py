@@ -22,7 +22,7 @@ from contracts.stream.microservices.tts.outbound.partial import (
 )
 from shared_logging import get_logger
 
-from application.dtos.audio_segment_outbound import (
+from application.dtos.outbound.audio_segment_outbound import (
     AudioChunk,
     AudioSegmentEvent,
     SegmentCompleted,
@@ -31,8 +31,6 @@ from application.dtos.audio_segment_outbound import (
 )
 
 logger = get_logger(__name__)
-
-NDJSON_MEDIA_TYPE = "application/x-ndjson"
 
 
 async def audio_events_as_ndjson(

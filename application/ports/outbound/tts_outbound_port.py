@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 
-from application.dtos.audio_segment_outbound import (
+from application.dtos.outbound.audio_segment_outbound import (
     AudioChunk,
     AudioSegmentEvent,
     SegmentCompleted,
@@ -14,7 +14,7 @@ _FRAMES_PER_CHUNK = 1024
 _BYTES_PER_SAMPLE = 2
 
 
-class SpeechSynthesisPort(ABC):
+class TtsOutboundPort(ABC):
     """What the application needs from a text-to-speech engine."""
 
     @abstractmethod

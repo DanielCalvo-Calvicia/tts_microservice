@@ -27,3 +27,5 @@
 - Positive: the silent case becomes visible to the deployment tool and to anyone calling `/available`, with no `contracts` change and no risk for Brain's preflight.
 - Negative: Brain itself will not show the reason (it ignores `reason` when available); a change there would be a separate task in `brain_microservice`. A healthy service does not name its engine in the answer; only the log does. Consumers that print `reason` only on failure will not print it either.
 - Debt D-6 closes when T-01.2.2 and T-02.2 are built and verified, not when this decision is recorded. They were, on 2026-11-06 (T-03.2, T-03.4).
+
+> **Update 2026-11-11:** `SpeechSynthesisPort` is now `TtsOutboundPort` and `TtsSynthesisPort` is `TtsServicePort`; the handler reaches `fallback_reason()` through the new `TtsInboundPort`. Same behaviour.

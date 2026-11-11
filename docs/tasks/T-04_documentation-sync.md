@@ -29,3 +29,4 @@ After T-01, after T-02 and after T-03 (and whenever a task note says a document 
 | Pass | Date | Notes |
 |---|---|---|
 | 1 | 2026-11-06 | Plan written; nothing built yet. |
+| 2 | 2026-11-11 | After the restructure to the layout of `stt_microservice` (three ports, `dtos/inbound` and `dtos/outbound`, `routes/`, `response/`, `errors/`, `helpers/`, one dependency file each; `requirements.dev.txt`; `.engram/` removed). Done: test count 170; the paths in README, CLAUDE.md, architecture, API, ADR-001/006/008 (dated notes); "uncommitted" statements corrected (commit `fbec6c5` holds the 2026-11-06 work and contracts 0.16.0); the board and ORDER (T-01 and T-01.1 are done, T-03 is open only for the postponed arm64 task). Not rewritten on purpose: the task notes and `deployment_audit/tts.md` (records; they still cite the old file names). Links: 0 broken. |

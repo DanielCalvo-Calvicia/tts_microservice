@@ -15,3 +15,5 @@ The first version was a 410-line `fastapi_adapter.py` that acted as inbound adap
 
 - Positive: engines are swappable without touching the service (Piper, espeak and pyttsx3 share one port); the stream logic is tested with a fake engine; the layout matches the other services.
 - Negative: more files than the problem strictly needs for a small service.
+
+> **Update 2026-11-11:** the application now owns three ports, not two: `TtsServicePort` (the service's own, what `TtsService` implements; it was called `TtsSynthesisPort` and sat in `ports/inbound/`), `TtsInboundPort` (new: what every inbound adapter offers, implemented by the HTTP handler) and `TtsOutboundPort` (what every engine offers; it was called `SpeechSynthesisPort`, file `tts_outbound_port.py`). The DTOs are in `application/dtos/inbound` and `application/dtos/outbound`. The inbound adapter folder follows `stt_microservice` and `dynamics_microservice` (`http_handler.py` wires, `routes/`, `response/`, `errors/`, `helpers/`); `helpers/` is the one place the `helpers` name is allowed. `tests/architecture/test_ports.py` and `test_dtos.py` check it. No behaviour changed.
